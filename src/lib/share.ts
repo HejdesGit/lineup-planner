@@ -86,7 +86,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
 }
 
 function isValidChunkMinutes(chunkMinutes: number) {
-  return chunkMinutes >= 5 && chunkMinutes <= 10 && Number.isInteger(chunkMinutes * 2)
+  return Number.isFinite(chunkMinutes) && chunkMinutes >= 3.75 && chunkMinutes <= 10
 }
 
 export function buildLineupShareUrl(encodedSnapshot: string, currentUrl: string) {

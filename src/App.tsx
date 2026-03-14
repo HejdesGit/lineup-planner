@@ -105,9 +105,18 @@ const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 10
 const DEFAULT_SHARE_SEED = 20260314
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
-const CHUNK_MINUTE_OPTIONS_BY_PERIOD = {
-  15: [5, 7.5],
-  20: [5, 10],
+const SUBSTITUTIONS_PER_PERIOD_OPTIONS = [2, 3, 4] as const
+const SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES = {
+  15: {
+    2: 7.5,
+    3: 5,
+    4: 3.75,
+  },
+  20: {
+    2: 10,
+    3: 20 / 3,
+    4: 5,
+  },
 } as const
 
 interface FormState {
@@ -342,7 +351,7 @@ function HeroPanel() {
         </h1>
         <p className="max-w-2xl text-sm leading-7 text-stone-300 sm:text-base sm:leading-6">
           Målvakten hålls utanför formationen. Du väljer mellan 2-3-1 och 3-2-1, samt
-          spelfönster mellan 5 och 10 minuter.
+          2, 3 eller 4 planerade byten per period.
         </p>
       </div>
     </div>
@@ -368,8 +377,8 @@ function SettingsPanel({
   onGenerate: () => void
   onShareViaWhatsApp: () => void
 }) {
-  const showChunkRecommendation = rosterCount >= 10 && state.chunkMinutes >= 10
-  const chunkMinuteOptions = getChunkMinuteOptions(state.periodMinutes, state.chunkMinutes)
+  const showChunkRecommendation = rosterCount >= 10 && getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes) <= 2
+  const substitutionOptions = getSubstitutionOptions(state.periodMinutes, state.chunkMinutes)
 
   return (
     <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
@@ -464,16 +473,16 @@ function SettingsPanel({
 
         <div className="grid gap-4">
           <Field
-            label="Spelfönster"
+            label="Antal byten"
             htmlFor="chunk-minutes"
-            hint="Spelarna håller uppställningen hela fönstret och byter när fönstret slutar. Om perioden inte går jämnt upp blir sista fönstret kortare."
+            hint="Appen delar perioden i jämna byteblock utifrån hur många byten du vill planera per period."
           >
             <SelectControl
               id="chunk-minutes"
               value={state.chunkMinutes}
               onChange={(event) => dispatch({ type: 'setChunkMinutes', value: Number(event.target.value) })}
             >
-              {chunkMinuteOptions.map((option) => (
+              {substitutionOptions.map((option) => (
                 <option key={`${state.periodMinutes}-${option.value}`} value={option.value}>
                   {option.label}
                 </option>
@@ -486,8 +495,8 @@ function SettingsPanel({
                 Rekommendation
               </p>
               <p className="mt-1">
-                Med {rosterCount} spelare och {formatMinuteValue(state.chunkMinutes)}-minutersfönster kan väntan bli
-                lång. Prova gärna 5 till 7,5 minuter om du vill korta bänkpassen.
+                Med {rosterCount} spelare och {getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes)} byten
+                per period kan väntan bli lång. Prova gärna 3 eller 4 byten om du vill korta bänkpassen.
               </p>
             </div>
           ) : null}
@@ -581,7 +590,10 @@ function MatchOverview({
         />
         <SummaryChip label="Formation" value={plan.formation} />
         <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
-        <SummaryChip label="Byten" value={`var ${formatMinuteValue(plan.chunkMinutes)}:e min`} />
+        <SummaryChip
+          label="Byten"
+          value={`${getSubstitutionsPerPeriod(plan.periodMinutes, plan.chunkMinutes)} per period`}
+        />
         <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
       </div>
     </section>
@@ -597,7 +609,7 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
         <div>
           <h2 className="font-display text-3xl font-bold text-white">Speltid per spelare</h2>
           <p className="text-sm text-stone-300">
-            Dubbelkolla minuter, bänktid och vilka roller varje spelare hann prova. Fäll ut en spelare för detaljer per period och spelfönster.
+            Dubbelkolla minuter, bänktid och vilka roller varje spelare hann prova. Fäll ut en spelare för detaljer per period och byteblock.
           </p>
         </div>
       </div>
@@ -901,10 +913,10 @@ function PeriodCard({
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div>
                   <p className="font-mono text-xs uppercase tracking-[0.22em] text-stone-500">
-                    {chunk.startMinute}-{chunk.endMinute} min
+                    {formatMinuteRangeLabel(chunk.startMinute, chunk.endMinute)}
                   </p>
                   <p className="text-sm text-stone-300">
-                    Spelfönster {chunk.windowIndex + 1} · byte efter {chunk.durationMinutes} min
+                    Byteblock {chunk.windowIndex + 1} · {formatMinuteDuration(chunk.durationMinutes)}
                   </p>
                 </div>
                 <p className="text-sm text-stone-300">
@@ -1445,7 +1457,7 @@ function buildPlayerDetail(
 
         return {
           windowIndex: chunk.windowIndex,
-          rangeLabel: `${chunk.startMinute}-${chunk.endMinute} min`,
+          rangeLabel: formatMinuteRangeLabel(chunk.startMinute, chunk.endMinute),
           statusLabel: isGoalkeeper ? 'Målvakt' : position ? position : 'Bänk',
           isActive,
           isGoalkeeper,
@@ -1706,25 +1718,40 @@ function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinut
   }
 }
 
-function getChunkMinuteOptions(periodMinutes: 15 | 20, currentChunkMinutes?: number) {
-  const recommendedValues = [...CHUNK_MINUTE_OPTIONS_BY_PERIOD[periodMinutes]] as number[]
-  const values =
-    typeof currentChunkMinutes === 'number' && !recommendedValues.includes(currentChunkMinutes)
-      ? [...recommendedValues, currentChunkMinutes].sort((left, right) => left - right)
-      : recommendedValues
+function getSubstitutionOptions(periodMinutes: 15 | 20, currentChunkMinutes?: number) {
+  const options = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) => {
+    const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
 
-  return values.map((value) => ({
-    value,
-    label: `${formatMinuteValue(value)} minuter (${formatChunkPattern(periodMinutes, value)})`,
-  }))
+    return {
+      value: chunkMinutes,
+      label: `${substitutionsPerPeriod} byten (${formatChunkPattern(periodMinutes, chunkMinutes)})`,
+    }
+  })
+
+  if (
+    typeof currentChunkMinutes === 'number' &&
+    !options.some((option) => areMinuteValuesEqual(option.value, currentChunkMinutes))
+  ) {
+    return [
+      ...options,
+      {
+        value: currentChunkMinutes,
+        label: `Länkdelning (${formatMinuteValue(currentChunkMinutes)} min)`,
+      },
+    ]
+  }
+
+  return options
 }
 
 function getNormalizedChunkMinutes(periodMinutes: 15 | 20, currentChunkMinutes: number) {
-  const recommendedValues = CHUNK_MINUTE_OPTIONS_BY_PERIOD[periodMinutes] as readonly number[]
+  const supportedChunkMinutes = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) =>
+    getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
+  )
 
-  return recommendedValues.includes(currentChunkMinutes)
+  return supportedChunkMinutes.some((value) => areMinuteValuesEqual(value, currentChunkMinutes))
     ? currentChunkMinutes
-    : recommendedValues[0]
+    : supportedChunkMinutes[0]
 }
 
 function formatChunkPattern(periodMinutes: 15 | 20, chunkMinutes: number) {
@@ -1737,11 +1764,70 @@ function formatChunkPattern(periodMinutes: 15 | 20, chunkMinutes: number) {
     remainingMinutes -= windowMinutes
   }
 
-  return windows.map((value) => formatMinuteValue(value)).join('+')
+  return windows.map((value) => formatMinutePatternValue(value)).join('+')
 }
 
 function formatMinuteValue(value: number) {
-  return Number.isInteger(value) ? `${value}` : value.toFixed(1).replace('.', ',')
+  if (Number.isInteger(value)) {
+    return `${value}`
+  }
+
+  return formatMinuteClockValue(value)
+}
+
+function formatMinuteDuration(value: number) {
+  if (Number.isInteger(value)) {
+    return `${formatMinuteValue(value)} min`
+  }
+
+  const { minutes, seconds } = splitMinutesAndSeconds(value)
+
+  return `${minutes} min ${seconds} sek`
+}
+
+function formatMinuteRangeLabel(startMinute: number, endMinute: number) {
+  return `${formatMinuteValue(startMinute)}-${formatMinuteValue(endMinute)}`
+}
+
+function formatMinutePatternValue(value: number) {
+  if (Number.isInteger(value)) {
+    return formatMinuteValue(value)
+  }
+
+  return formatMinuteClockValue(value)
+}
+
+function formatMinuteClockValue(value: number) {
+  const { minutes, seconds } = splitMinutesAndSeconds(value)
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+function splitMinutesAndSeconds(value: number) {
+  const totalSeconds = Math.round(value * 60)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return { minutes, seconds }
+}
+
+function getChunkMinutesForSubstitutions(
+  periodMinutes: 15 | 20,
+  substitutionsPerPeriod: (typeof SUBSTITUTIONS_PER_PERIOD_OPTIONS)[number],
+) {
+  return SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES[periodMinutes][substitutionsPerPeriod]
+}
+
+function getSubstitutionsPerPeriod(periodMinutes: 15 | 20, chunkMinutes: number) {
+  const match = SUBSTITUTIONS_PER_PERIOD_OPTIONS.find((substitutionsPerPeriod) =>
+    areMinuteValuesEqual(getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod), chunkMinutes),
+  )
+
+  return match ?? 2
+}
+
+function areMinuteValuesEqual(left: number, right: number) {
+  return Math.abs(left - right) < 0.001
 }
 
 function getRosterNames(input: string) {

@@ -590,15 +590,15 @@ function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchCh
     let cursor = 0
     let windowIndex = 0
 
-    while (cursor < periodMinutes) {
-      const nextCursor = Math.min(cursor + chunkMinutes, periodMinutes)
+    while (cursor < periodMinutes - 0.0001) {
+      const nextCursor = roundMinuteValue(Math.min(cursor + chunkMinutes, periodMinutes))
       chunks.push({
         chunkIndex,
         periodIndex,
         windowIndex,
-        startMinute: cursor,
+        startMinute: roundMinuteValue(cursor),
         endMinute: nextCursor,
-        durationMinutes: nextCursor - cursor,
+        durationMinutes: roundMinuteValue(nextCursor - cursor),
       })
       cursor = nextCursor
       windowIndex += 1
@@ -610,7 +610,11 @@ function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchCh
 }
 
 function isValidChunkMinutes(chunkMinutes: number) {
-  return chunkMinutes >= 5 && chunkMinutes <= 10 && Number.isInteger(chunkMinutes * 2)
+  return Number.isFinite(chunkMinutes) && chunkMinutes >= 3.75 && chunkMinutes <= 10
+}
+
+function roundMinuteValue(value: number) {
+  return Math.round(value * 1000) / 1000
 }
 
 function createHistories(players: Player[], goalkeepers: string[]): Record<string, PlayerHistory> {
