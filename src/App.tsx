@@ -172,7 +172,7 @@ function App() {
               ))}
             </section>
 
-            <PlayerMinutesSection summaries={plan.summaries} />
+            <PlayerMinutesSection plan={plan} />
           </>
         ) : (
           <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-8 text-center text-stone-300">
@@ -398,12 +398,13 @@ function MatchOverview({
           {plan.periodMinutes} min/period
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <SummaryChip
           label="Målvakter"
           value={plan.goalkeepers.map((goalkeeperId) => playerNameById[goalkeeperId]).join(', ')}
         />
         <SummaryChip label="Formation" value={plan.formation} />
+        <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
         <SummaryChip label="Byten" value={`var ${plan.chunkMinutes}:e min`} />
         <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
       </div>
@@ -411,74 +412,142 @@ function MatchOverview({
   )
 }
 
-function PlayerMinutesSection({ summaries }: { summaries: MatchPlan['summaries'] }) {
+function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
+  const playerNameById = Object.fromEntries(plan.summaries.map((summary) => [summary.playerId, summary.name]))
+
   return (
     <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-5 backdrop-blur">
       <div className="mb-5 flex items-end justify-between gap-4">
         <div>
           <h2 className="font-display text-3xl font-bold text-white">Speltid per spelare</h2>
           <p className="text-sm text-stone-300">
-            Dubbelkolla minuter, bänktid och vilka roller varje spelare hann prova.
+            Dubbelkolla minuter, bänktid och vilka roller varje spelare hann prova. Fäll ut en spelare för detaljer per period och spelfönster.
           </p>
         </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {summaries.map((summary) => (
-          <article
-            key={summary.playerId}
-            className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-display text-2xl font-bold text-white">{summary.name}</h3>
-                <p className="font-mono text-xs uppercase tracking-[0.24em] text-stone-400">
-                  {summary.goalkeeperPeriods.length > 0
-                    ? `MV i period ${summary.goalkeeperPeriods.join(', ')}`
-                    : 'Ingen målvaktsperiod'}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-clay-400 px-3 py-2 text-right text-clay-900">
-                <p className="font-display text-2xl font-black">{summary.totalMinutes}</p>
-                <p className="font-mono text-[10px] uppercase tracking-[0.22em]">min</p>
-              </div>
-            </div>
+        {plan.summaries.map((summary) => {
+          const playerDetail = buildPlayerDetail(plan, summary.playerId, playerNameById)
 
-            <dl className="mt-4 grid grid-cols-2 gap-3 text-sm text-stone-300">
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
-                  Bänktid
-                </dt>
-                <dd className="mt-1 text-lg font-semibold text-white">{summary.benchMinutes} min</dd>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
-                  Positioner
-                </dt>
-                <dd className="mt-1 text-lg font-semibold text-white">
-                  {summary.positionsPlayed.length > 0 ? summary.positionsPlayed.join(', ') : 'MV'}
-                </dd>
-              </div>
-            </dl>
+          return (
+            <details
+              key={summary.playerId}
+              className="group rounded-[1.5rem] border border-white/10 bg-white/5 p-4 open:border-clay-300/20 open:bg-white/[0.07]"
+            >
+              <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-display text-2xl font-bold text-white">{summary.name}</h3>
+                    <p className="font-mono text-xs uppercase tracking-[0.24em] text-stone-400">
+                      {summary.goalkeeperPeriods.length > 0
+                        ? `MV i period ${summary.goalkeeperPeriods.join(', ')}`
+                        : 'Ingen målvaktsperiod'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-2xl bg-clay-400 px-3 py-2 text-right text-clay-900">
+                      <p className="font-display text-2xl font-black">{summary.totalMinutes}</p>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em]">min</p>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
+                      Visa detaljer
+                    </span>
+                  </div>
+                </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {summary.roleGroups.length > 0 ? (
-                summary.roleGroups.map((group) => (
-                  <span
-                    key={group}
-                    className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 text-xs font-medium text-clay-100"
-                  >
-                    {group}
-                  </span>
-                ))
-              ) : (
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-stone-300">
-                  Endast målvakt
-                </span>
-              )}
-            </div>
-          </article>
-        ))}
+                <dl className="mt-4 grid grid-cols-2 gap-3 text-sm text-stone-300">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
+                      Bänktid
+                    </dt>
+                    <dd className="mt-1 text-lg font-semibold text-white">{summary.benchMinutes} min</dd>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
+                      Positioner
+                    </dt>
+                    <dd className="mt-1 text-lg font-semibold text-white">
+                      {summary.positionsPlayed.length > 0 ? summary.positionsPlayed.join(', ') : 'MV'}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {summary.roleGroups.length > 0 ? (
+                    summary.roleGroups.map((group) => (
+                      <span
+                        key={group}
+                        className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 text-xs font-medium text-clay-100"
+                      >
+                        {group}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-stone-300">
+                      Endast målvakt
+                    </span>
+                  )}
+                </div>
+              </summary>
+
+              <div className="mt-5 border-t border-white/10 pt-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <DetailStat label="Totaltid" value={`${summary.totalMinutes} min`} />
+                  <DetailStat label="Bänktid" value={`${summary.benchMinutes} min`} />
+                  <DetailStat
+                    label="Startroller"
+                    value={playerDetail.periods.map((period) => period.startStatus).join(' · ')}
+                  />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {playerDetail.periods.map((periodDetail) => (
+                    <div
+                      key={`${summary.playerId}-period-${periodDetail.period}`}
+                      className="rounded-[1.2rem] border border-white/10 bg-black/20 p-3"
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-clay-200">
+                            Period {periodDetail.period}
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-white">
+                            {periodDetail.minutes} min spel · {periodDetail.benchMinutes} min bänk
+                          </p>
+                        </div>
+                        <div className="text-sm text-stone-300">
+                          Start: <span className="font-medium text-white">{periodDetail.startStatus}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-2">
+                        {periodDetail.windows.map((windowDetail) => (
+                          <div
+                            key={`${summary.playerId}-period-${periodDetail.period}-window-${windowDetail.windowIndex}`}
+                            className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                          >
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">
+                                  {windowDetail.rangeLabel}
+                                </p>
+                                <p className="text-sm text-white">{windowDetail.statusLabel}</p>
+                              </div>
+                              {windowDetail.swapLabel ? (
+                                <p className="text-xs text-stone-400">{windowDetail.swapLabel}</p>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          )
+        })}
       </div>
     </section>
   )
@@ -542,9 +611,14 @@ function PeriodCard({
               </div>
 
               <p className="mb-3 text-xs text-stone-400">
-                {chunk.substitutions.length > 0
-                  ? `Byte: ${formatChunkSubstitutions(chunk.substitutions, nameById)}`
-                  : 'Startuppställning eller inga byten i detta fönster.'}
+                {chunk.substitutions.length > 0 ? (
+                  <>
+                    <span>Byte: </span>
+                    {formatChunkSubstitutions(chunk.substitutions, nameById)}
+                  </>
+                ) : (
+                  'Startuppställning eller inga byten i detta fönster.'
+                )}
               </p>
 
               <div className="grid gap-2 sm:grid-cols-2">
@@ -716,6 +790,62 @@ function SummaryChip({ label, value }: { label: string; value: string }) {
   )
 }
 
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">{label}</p>
+      <p className="mt-1 text-sm font-medium text-white">{value}</p>
+    </div>
+  )
+}
+
+function buildPlayerDetail(
+  plan: MatchPlan,
+  playerId: string,
+  nameById: Record<string, string>,
+) {
+  return {
+    periods: plan.periods.map((period) => {
+      const windows = period.chunks.map((chunk) => {
+        const position = Object.entries(chunk.lineup).find(([, lineupPlayerId]) => lineupPlayerId === playerId)?.[0]
+        const isGoalkeeper = chunk.goalkeeperId === playerId
+        const isActive = isGoalkeeper || Boolean(position)
+        const incomingSubstitution = chunk.substitutions.find(
+          (substitution) => substitution.playerInId === playerId,
+        )
+        const outgoingSubstitution = chunk.substitutions.find(
+          (substitution) => substitution.playerOutId === playerId,
+        )
+
+        return {
+          windowIndex: chunk.windowIndex,
+          rangeLabel: `${chunk.startMinute}-${chunk.endMinute} min`,
+          statusLabel: isGoalkeeper ? 'Målvakt' : position ? position : 'Bänk',
+          isActive,
+          swapLabel: incomingSubstitution
+            ? `${nameById[incomingSubstitution.playerInId]} in för ${nameById[incomingSubstitution.playerOutId]} (${incomingSubstitution.position})`
+            : outgoingSubstitution
+              ? `${nameById[outgoingSubstitution.playerOutId]} ut mot ${nameById[outgoingSubstitution.playerInId]} (${outgoingSubstitution.position})`
+              : null,
+          durationMinutes: chunk.durationMinutes,
+        }
+      })
+
+      return {
+        period: period.period,
+        minutes: windows
+          .filter((windowDetail) => windowDetail.isActive)
+          .reduce((total, windowDetail) => total + windowDetail.durationMinutes, 0),
+        benchMinutes: windows
+          .filter((windowDetail) => !windowDetail.isActive)
+          .reduce((total, windowDetail) => total + windowDetail.durationMinutes, 0),
+        startStatus: windows[0]?.statusLabel ?? 'Ingen',
+        windows,
+      }
+    }),
+  }
+}
+
 function normalizePlayers(input: string): Player[] {
   const names = parseNames(input)
 
@@ -794,12 +924,15 @@ function formatChunkSubstitutions(
   substitutions: MatchPlan['periods'][number]['chunks'][number]['substitutions'],
   nameById: Record<string, string>,
 ) {
-  return substitutions
-    .map(
-      (substitution) =>
-        `${nameById[substitution.playerInId]} in, ${nameById[substitution.playerOutId]} ut (${substitution.position})`,
-    )
-    .join(' · ')
+  return substitutions.map((substitution, index) => (
+    <span key={`${substitution.playerInId}-${substitution.playerOutId}-${substitution.position}`}>
+      <span className="font-semibold text-emerald-300">{nameById[substitution.playerInId]}</span>
+      <span> in, </span>
+      <span className="font-semibold text-amber-200">{nameById[substitution.playerOutId]}</span>
+      <span> ut ({substitution.position})</span>
+      {index < substitutions.length - 1 ? <span className="text-stone-500"> · </span> : null}
+    </span>
+  ))
 }
 
 function getChunkPositionCardClass(isIncomingNow: boolean, isOutgoingNext: boolean) {
