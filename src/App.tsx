@@ -150,8 +150,8 @@ function App() {
 
   return (
     <main className="relative min-h-screen overflow-hidden text-stone-100">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="grid gap-6 rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-board backdrop-blur md:grid-cols-[1.1fr_0.9fr]">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-3 py-4 sm:gap-8 sm:px-6 sm:py-6 lg:px-8">
+        <header className="grid gap-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-board backdrop-blur sm:rounded-[2rem] sm:gap-6 sm:p-6 md:grid-cols-[1.1fr_0.9fr]">
           <HeroPanel />
           <SettingsPanel
             state={formState}
@@ -186,15 +186,15 @@ function App() {
 
 function HeroPanel() {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       <p className="font-mono text-xs uppercase tracking-[0.32em] text-clay-200">
         7v7 match planner
       </p>
       <div className="space-y-3">
-        <h1 className="max-w-xl font-display text-4xl font-extrabold leading-none text-white sm:text-5xl lg:text-6xl">
+        <h1 className="max-w-[13ch] font-display text-[2.85rem] font-extrabold leading-[0.92] text-white sm:max-w-xl sm:text-5xl lg:text-6xl">
           Planera målvakt, utespelare och byten utan att låsa laget i samma roller.
         </h1>
-        <p className="max-w-2xl text-sm leading-6 text-stone-300 sm:text-base">
+        <p className="max-w-2xl text-sm leading-7 text-stone-300 sm:text-base sm:leading-6">
           Målvakten hålls utanför formationen. Du väljer mellan 2-3-1 och 3-2-1, samt
           spelfönster mellan 5 och 10 minuter.
         </p>
@@ -217,22 +217,24 @@ function SettingsPanel({
   onGenerate: () => void
 }) {
   return (
-    <section className="rounded-[1.75rem] border border-clay-300/20 bg-black/20 p-5">
-      <div className="mb-5 flex items-center justify-between">
+    <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-display text-2xl font-bold text-white">Matchinställningar</h2>
-          <p className="text-sm text-stone-300">
+          <h2 className="font-display text-[2rem] font-bold leading-none text-white sm:text-2xl">
+            Matchinställningar
+          </h2>
+          <p className="mt-2 max-w-md text-sm text-stone-300">
             Skriv namn, välj formation och justera hur ofta du vill kunna byta.
           </p>
         </div>
-        <div className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 font-mono text-xs text-clay-100">
+        <div className="w-fit rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 font-mono text-xs text-clay-100">
           3 perioder
         </div>
       </div>
 
       <div className="space-y-5">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <label
               htmlFor="players"
               className="font-mono text-xs uppercase tracking-[0.24em] text-stone-300"
@@ -247,7 +249,7 @@ function SettingsPanel({
                   onClick={() =>
                     dispatch({ type: 'setPlayerInput', value: createRandomRoster(count) })
                   }
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-stone-200 transition hover:border-clay-300/40 hover:bg-clay-500/10"
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-stone-200 transition hover:border-clay-300/40 hover:bg-clay-500/10"
                 >
                   Fyll {count}
                 </button>
@@ -257,7 +259,7 @@ function SettingsPanel({
                 onClick={() =>
                   dispatch({ type: 'setPlayerInput', value: BASE_PLAYER_POOL.join('\n') })
                 }
-                className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 text-xs font-medium text-clay-50 transition hover:border-clay-300/40 hover:bg-clay-500/20"
+                className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1.5 text-xs font-medium text-clay-50 transition hover:border-clay-300/40 hover:bg-clay-500/20"
               >
                 Fyll i Alla
               </button>
@@ -267,7 +269,7 @@ function SettingsPanel({
             id="players"
             value={state.playerInput}
             onChange={(event) => dispatch({ type: 'setPlayerInput', value: event.target.value })}
-            className="min-h-48 w-full rounded-[1.25rem] border border-white/10 bg-pitch-900/70 px-4 py-4 font-body text-base text-white placeholder:text-stone-500 focus:border-clay-300/60 focus:outline-none focus:ring-2 focus:ring-clay-300/20"
+            className="min-h-44 w-full rounded-[1.1rem] border border-white/10 bg-pitch-900/70 px-4 py-3.5 font-body text-base text-white placeholder:text-stone-500 focus:border-clay-300/60 focus:outline-none focus:ring-2 focus:ring-clay-300/20 sm:min-h-48 sm:rounded-[1.25rem] sm:py-4"
             placeholder="En spelare per rad"
           />
           <p className="text-xs text-stone-400">
@@ -359,7 +361,7 @@ function SettingsPanel({
           type="button"
           onClick={onGenerate}
           disabled={isPending}
-          className="inline-flex h-12 items-center justify-center rounded-full bg-clay-400 px-6 font-display text-lg font-bold text-clay-900 transition hover:bg-clay-300 disabled:cursor-wait disabled:opacity-70"
+          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-clay-400 px-6 font-display text-lg font-bold text-clay-900 transition hover:bg-clay-300 disabled:cursor-wait disabled:opacity-70 sm:w-auto"
         >
           {isPending ? 'Genererar...' : 'Generera uppställning'}
         </button>
@@ -490,16 +492,16 @@ function PeriodCard({
   nameById: Record<string, string>
 }) {
   return (
-    <article className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5 backdrop-blur">
-      <div className="mb-5 flex items-start justify-between gap-3">
+    <article className="rounded-[1.5rem] border border-white/10 bg-white/5 p-3.5 backdrop-blur sm:rounded-[1.75rem] sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.24em] text-clay-200">Period {period.period}</p>
-          <h2 className="mt-1 font-display text-3xl font-black text-white">
+          <h2 className="mt-1 font-display text-2xl font-black text-white sm:text-3xl">
             MV: {period.goalkeeperName}
           </h2>
           <p className="mt-1 text-sm text-stone-300">Formation: {period.formation}</p>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-right">
+        <div className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-left sm:w-auto sm:max-w-[18rem] sm:text-right">
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">Startbänk</p>
           <p className="mt-1 text-sm text-white">
             {period.chunks[0]?.substitutes.length ? period.chunks[0].substitutes.join(', ') : 'Ingen'}
@@ -514,7 +516,7 @@ function PeriodCard({
         nameById={nameById}
       />
 
-      <div className="mt-5 space-y-3">
+      <div className="mt-4 space-y-3 sm:mt-5">
         {period.chunks.map((chunk, chunkIndex) => {
           const nextChunk = period.chunks[chunkIndex + 1]
           const currentIncomingIds = new Set(chunk.substitutions.map((substitution) => substitution.playerInId))
@@ -523,9 +525,9 @@ function PeriodCard({
           return (
             <div
               key={chunk.chunkIndex}
-              className="rounded-[1.25rem] border border-white/10 bg-black/20 px-4 py-3"
+              className="rounded-[1.1rem] border border-white/10 bg-black/20 px-3 py-3 sm:rounded-[1.25rem] sm:px-4"
             >
-              <div className="mb-3 flex items-center justify-between gap-4">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div>
                   <p className="font-mono text-xs uppercase tracking-[0.22em] text-stone-500">
                     {chunk.startMinute}-{chunk.endMinute} min
@@ -587,9 +589,9 @@ function FormationBoard({
   nameById: Record<string, string>
 }) {
   return (
-    <div className="rounded-[1.75rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-4">
-      <div className="rounded-[1.5rem] border border-white/10 border-dashed p-4">
-        <div className="space-y-4">
+    <div className="rounded-[1.35rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-2.5 sm:rounded-[1.75rem] sm:p-4">
+      <div className="rounded-[1.2rem] border border-white/10 border-dashed p-3 sm:rounded-[1.5rem] sm:p-4">
+        <div className="space-y-3 sm:space-y-4">
           {FORMATION_PRESETS[formation].rows.map((row) => (
             <FormationRow key={`${formation}-${row.join('-')}`}>
               {row.map((position) => (
@@ -602,7 +604,7 @@ function FormationBoard({
               ))}
             </FormationRow>
           ))}
-          <div className="mx-auto mt-2 flex max-w-40 justify-center border-t border-dashed border-white/10 pt-4">
+          <div className="mx-auto mt-1.5 flex max-w-32 justify-center border-t border-dashed border-white/10 pt-3 sm:mt-2 sm:max-w-40 sm:pt-4">
             <PositionBadge label="MV" player={goalkeeper} tone="gk" />
           </div>
         </div>
@@ -653,7 +655,7 @@ function SelectControl({
         id={id}
         value={value}
         onChange={onChange}
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-pitch-900/70 px-4 py-3 pr-14 text-base text-white focus:border-clay-300/60 focus:outline-none focus:ring-2 focus:ring-clay-300/20"
+        className="w-full appearance-none rounded-[1.1rem] border border-white/10 bg-pitch-900/70 px-4 py-3 pr-14 text-base text-white focus:border-clay-300/60 focus:outline-none focus:ring-2 focus:ring-clay-300/20 sm:rounded-2xl"
       >
         {children}
       </select>
@@ -676,7 +678,7 @@ function SelectControl({
 }
 
 function FormationRow({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-center gap-3">{children}</div>
+  return <div className="flex items-center justify-center gap-2 sm:gap-3">{children}</div>
 }
 
 function PositionBadge({
@@ -696,9 +698,11 @@ function PositionBadge({
   }
 
   return (
-    <div className={`min-w-28 rounded-[1.2rem] border px-3 py-3 text-center ${tones[tone]}`}>
+    <div
+      className={`min-w-[5.4rem] rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]}`}
+    >
       <p className="font-mono text-[10px] uppercase tracking-[0.28em] opacity-75">{label}</p>
-      <p className="mt-1 text-sm font-semibold">{player}</p>
+      <p className="mt-1 text-xs font-semibold sm:text-sm">{player}</p>
     </div>
   )
 }
