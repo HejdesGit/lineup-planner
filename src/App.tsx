@@ -35,7 +35,9 @@ import {
   GOALKEEPER_SLOT,
   applyPeriodOverrides,
   createBoardAssignments,
+  getBoardBenchSlots,
   getBoardLineup,
+  isBenchSlot,
   swapBoardAssignments,
   type BoardSlotId,
   type PeriodBoardOverrides,
@@ -220,6 +222,9 @@ function App() {
                   period={period}
                   boardAssignments={periodOverrides[period.period] ?? createBoardAssignments(plan.periods[index])}
                   nameById={playerNameById}
+                  defaultLockedSlots={
+                    displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
+                  }
                   onSwapSlots={(sourceSlot, targetSlot) => {
                     setPeriodOverrides((current) => {
                       const currentAssignments =
@@ -632,24 +637,46 @@ function PeriodCard({
   boardAssignments,
   nameById,
   onSwapSlots,
+  defaultLockedSlots,
 }: {
   period: PeriodPlan
   boardAssignments: Record<BoardSlotId, string>
   nameById: Record<string, string>
   onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
+  defaultLockedSlots: BoardSlotId[]
 }) {
-  const [lockedSlots, setLockedSlots] = useState<BoardSlotId[]>([])
+  const [manualLockedSlots, setManualLockedSlots] = useState<BoardSlotId[]>([])
+  const [dismissedDefaultLockedSlots, setDismissedDefaultLockedSlots] = useState<BoardSlotId[]>([])
   const [activeSlot, setActiveSlot] = useState<BoardSlotId | null>(null)
   const [overSlot, setOverSlot] = useState<BoardSlotId | null>(null)
   const displayLineup = getBoardLineup(boardAssignments, period.positions)
   const displayGoalkeeperId = boardAssignments[GOALKEEPER_SLOT]
   const displayGoalkeeperName = nameById[displayGoalkeeperId] ?? period.goalkeeperName
+  const startBenchSlots = useMemo(() => getBoardBenchSlots(boardAssignments), [boardAssignments])
+  const startBenchNames = useMemo(
+    () =>
+      startBenchSlots.map((slotId) => {
+        const playerId = boardAssignments[slotId]
+        return nameById[playerId] ?? '-'
+      }),
+    [boardAssignments, nameById, startBenchSlots],
+  )
+  const lockedSlots = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...defaultLockedSlots.filter((slotId) => !dismissedDefaultLockedSlots.includes(slotId)),
+          ...manualLockedSlots,
+        ]),
+      ),
+    [defaultLockedSlots, dismissedDefaultLockedSlots, manualLockedSlots],
+  )
   const canPreviewSwap = Boolean(
     activeSlot &&
       overSlot &&
       activeSlot !== overSlot &&
       !lockedSlots.includes(activeSlot) &&
-      !lockedSlots.includes(overSlot),
+    !lockedSlots.includes(overSlot),
   )
   const previewAssignments = useMemo(
     () => {
@@ -661,14 +688,25 @@ function PeriodCard({
     },
     [activeSlot, boardAssignments, canPreviewSwap, overSlot],
   )
-  const previewLineup = getBoardLineup(previewAssignments, period.positions)
-  const previewGoalkeeperId = previewAssignments[GOALKEEPER_SLOT]
   const activePlayerName = activeSlot ? boardAssignments[activeSlot] : null
 
   const handleToggleLock = (slotId: BoardSlotId) => {
-    setLockedSlots((current) =>
-      current.includes(slotId) ? current.filter((entry) => entry !== slotId) : [...current, slotId],
-    )
+    if (manualLockedSlots.includes(slotId)) {
+      setManualLockedSlots((current) => current.filter((entry) => entry !== slotId))
+      return
+    }
+
+    if (defaultLockedSlots.includes(slotId) && !dismissedDefaultLockedSlots.includes(slotId)) {
+      setDismissedDefaultLockedSlots((current) => [...current, slotId])
+      return
+    }
+
+    if (defaultLockedSlots.includes(slotId) && dismissedDefaultLockedSlots.includes(slotId)) {
+      setDismissedDefaultLockedSlots((current) => current.filter((entry) => entry !== slotId))
+      return
+    }
+
+    setManualLockedSlots((current) => [...current, slotId])
   }
 
   const handleSwapAttempt = (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => {
@@ -696,15 +734,14 @@ function PeriodCard({
         <div className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-left sm:w-auto sm:max-w-[18rem] sm:text-right">
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">Startbänk</p>
           <p className="mt-1 text-sm text-white">
-            {period.chunks[0]?.substitutes.length ? period.chunks[0].substitutes.join(', ') : 'Ingen'}
+            {startBenchNames.length ? startBenchNames.join(', ') : 'Ingen'}
           </p>
         </div>
       </div>
 
       <FormationBoard
         formation={period.formation}
-        lineup={previewLineup}
-        goalkeeperId={previewGoalkeeperId}
+        boardAssignments={previewAssignments}
         nameById={nameById}
         lockedSlots={lockedSlots}
         onToggleLock={handleToggleLock}
@@ -789,8 +826,7 @@ function PeriodCard({
 
 function FormationBoard({
   formation,
-  lineup,
-  goalkeeperId,
+  boardAssignments,
   nameById,
   lockedSlots,
   onToggleLock,
@@ -803,8 +839,7 @@ function FormationBoard({
   onDragEnd,
 }: {
   formation: FormationKey
-  lineup: Lineup
-  goalkeeperId: string
+  boardAssignments: Record<BoardSlotId, string>
   nameById: Record<string, string>
   lockedSlots: BoardSlotId[]
   onToggleLock: (slotId: BoardSlotId) => void
@@ -854,9 +889,15 @@ function FormationBoard({
     },
     [],
   )
+  const lineup = useMemo(
+    () => getBoardLineup(boardAssignments, FORMATION_PRESETS[formation].positions),
+    [boardAssignments, formation],
+  )
+  const goalkeeperId = boardAssignments[GOALKEEPER_SLOT]
+  const benchSlots = useMemo(() => getBoardBenchSlots(boardAssignments), [boardAssignments])
   const slotOrder = useMemo<BoardSlotId[]>(
-    () => [...FORMATION_PRESETS[formation].positions, GOALKEEPER_SLOT],
-    [formation],
+    () => [...FORMATION_PRESETS[formation].positions, GOALKEEPER_SLOT, ...benchSlots],
+    [benchSlots, formation],
   )
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -917,7 +958,7 @@ function FormationBoard({
     >
       <SortableContext items={slotOrder} strategy={rectSwappingStrategy}>
         <div className="rounded-[1.35rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-2.5 sm:rounded-[1.75rem] sm:p-4">
-          <div className="rounded-[1.2rem] border border-white/10 border-dashed p-3 sm:rounded-[1.5rem] sm:p-4">
+          <div className="rounded-[1.2rem] border-white/10 p-3 sm:rounded-[1.5rem] sm:p-4">
             <div className="mb-3 flex justify-end">
               <p className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-right font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
                 Dra eller tryck-dra för att byta plats
@@ -925,6 +966,41 @@ function FormationBoard({
               </p>
             </div>
             <div className="space-y-3 sm:space-y-4">
+              {benchSlots.length > 0 ? (
+                <div className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3 sm:rounded-[1.2rem]">
+                  <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">
+                      Startbänk
+                    </p>
+                    <p className="text-[10px] text-stone-500">Dra in på plan eller byt tillbaka till bänk</p>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {benchSlots.map((slotId) => (
+                      <PositionBadge
+                        key={slotId}
+                        slotId={slotId}
+                        label={getBoardSlotLabel(slotId)}
+                        player={nameById[boardAssignments[slotId]] ?? '-'}
+                        tone="bench"
+                        locked={lockedSlots.includes(slotId)}
+                        dragState={
+                          activeSlot === slotId ? 'source' : overSlot === slotId ? 'target' : 'idle'
+                        }
+                        onToggleLock={onToggleLock}
+                        onHoverSlot={
+                          activeSlot
+                            ? (nextSlotId) => {
+                              if (nextSlotId !== activeSlot && !lockedSlots.includes(nextSlotId)) {
+                                syncHoveredSlot(nextSlotId)
+                              }
+                            }
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {FORMATION_PRESETS[formation].rows.map((row) => (
                 <FormationRow key={`${formation}-${row.join('-')}`}>
                   {row.map((position) => (
@@ -946,10 +1022,10 @@ function FormationBoard({
                       onHoverSlot={
                         activeSlot
                           ? (slotId) => {
-                              if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
-                                syncHoveredSlot(slotId)
-                              }
+                            if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
+                              syncHoveredSlot(slotId)
                             }
+                          }
                           : undefined
                       }
                     />
@@ -974,10 +1050,10 @@ function FormationBoard({
                   onHoverSlot={
                     activeSlot
                       ? (slotId) => {
-                          if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
-                            syncHoveredSlot(slotId)
-                          }
+                        if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
+                          syncHoveredSlot(slotId)
                         }
+                      }
                       : undefined
                   }
                 />
@@ -989,7 +1065,7 @@ function FormationBoard({
       <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
         {activeSlot && activePlayer && activeTone ? (
           <PositionBadgeCard
-            label={activeSlot}
+            label={getBoardSlotLabel(activeSlot)}
             player={activePlayer}
             tone={activeTone}
             locked={lockedSlots.includes(activeSlot)}
@@ -1084,7 +1160,7 @@ function PositionBadge({
   slotId: BoardSlotId
   label: string
   player: string
-  tone: 'def' | 'mid' | 'att' | 'gk'
+  tone: 'def' | 'mid' | 'att' | 'gk' | 'bench'
   locked: boolean
   dragState: 'idle' | 'source' | 'target'
   onToggleLock: (slotId: BoardSlotId) => void
@@ -1136,7 +1212,7 @@ function PositionBadgeCard({
 }: {
   label: string
   player: string
-  tone: 'def' | 'mid' | 'att' | 'gk'
+  tone: 'def' | 'mid' | 'att' | 'gk' | 'bench'
   locked: boolean
   dragState: 'idle' | 'source' | 'target'
   isOverlay?: boolean
@@ -1148,21 +1224,21 @@ function PositionBadgeCard({
     mid: 'border-emerald-300/35 bg-[linear-gradient(180deg,rgba(74,222,128,0.2),rgba(6,78,59,0.34))] text-emerald-50 shadow-[inset_0_1px_0_rgba(209,250,229,0.12),0_0_0_1px_rgba(6,78,59,0.16)]',
     att: 'border-rose-300/35 bg-[linear-gradient(180deg,rgba(251,113,133,0.2),rgba(127,29,29,0.34))] text-rose-50 shadow-[inset_0_1px_0_rgba(255,228,230,0.12),0_0_0_1px_rgba(127,29,29,0.16)]',
     gk: 'border-amber-300/35 bg-[linear-gradient(180deg,rgba(251,191,36,0.22),rgba(120,53,15,0.34))] text-amber-50 shadow-[inset_0_1px_0_rgba(254,243,199,0.12),0_0_0_1px_rgba(120,53,15,0.16)]',
+    bench:
+      'border-white/15 bg-[linear-gradient(180deg,rgba(250,250,249,0.08),rgba(28,25,23,0.28))] text-stone-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(28,25,23,0.16)]',
   }
 
   return (
     <div
-      className={`group relative min-w-[5.4rem] touch-manipulation select-none rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]} ${
-        locked ? 'ring-2 ring-clay-200/40 shadow-[0_0_0_2px_rgba(251,191,36,0.16)]' : ''
-      } ${
-        isOverlay
+      className={`group relative min-w-[5.4rem] touch-manipulation select-none rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]} ${locked ? 'ring-2 ring-clay-200/40 shadow-[0_0_0_2px_rgba(251,191,36,0.16)]' : ''
+        } ${isOverlay
           ? 'scale-[1.02] shadow-2xl opacity-95'
           : dragState === 'source'
             ? 'scale-[0.97] opacity-70 ring-2 ring-clay-200/30 shadow-[0_0_0_1px_rgba(251,191,36,0.12)]'
             : dragState === 'target'
               ? 'ring-2 ring-emerald-300/45 shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_0_28px_rgba(16,185,129,0.12)]'
               : ''
-      }`}
+        }`}
       {...dragHandleProps}
     >
       {locked ? (
@@ -1180,11 +1256,10 @@ function PositionBadgeCard({
             event.stopPropagation()
             onToggleLock()
           }}
-          className={`absolute right-2 top-2 z-10 rounded-full border px-1.5 py-1 font-mono text-[9px] uppercase tracking-[0.18em] ${
-            locked
-              ? 'border-clay-200/50 bg-clay-400/30 text-clay-50'
-              : 'border-white/10 bg-black/20 text-stone-300'
-          }`}
+          className={`absolute right-2 top-2 z-10 rounded-full border px-1.5 py-1 font-mono text-[9px] uppercase tracking-[0.18em] ${locked
+            ? 'border-clay-200/50 bg-clay-400/30 text-clay-50'
+            : 'border-white/10 bg-black/20 text-stone-300'
+            }`}
           aria-label={locked ? `Lås upp ${player} på ${label}` : `Lås ${player} på ${label}`}
         >
           {locked ? 'Låst' : 'Lås'}
@@ -1303,7 +1378,7 @@ function createRandomRoster(count: number) {
 function shuffle<T>(items: T[]) {
   for (let index = items.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1))
-    ;[items[index], items[swapIndex]] = [items[swapIndex], items[index]]
+      ;[items[index], items[swapIndex]] = [items[swapIndex], items[index]]
   }
 
   return items
@@ -1381,7 +1456,27 @@ function getPositionTone(position: OutfieldPosition) {
 }
 
 function getBoardSlotTone(slotId: BoardSlotId) {
-  return slotId === GOALKEEPER_SLOT ? 'gk' : getPositionTone(slotId)
+  if (slotId === GOALKEEPER_SLOT) {
+    return 'gk'
+  }
+
+  if (isBenchSlot(slotId)) {
+    return 'bench'
+  }
+
+  return getPositionTone(slotId)
+}
+
+function getBoardSlotLabel(slotId: BoardSlotId) {
+  if (slotId === GOALKEEPER_SLOT) {
+    return 'MV'
+  }
+
+  if (isBenchSlot(slotId)) {
+    return slotId
+  }
+
+  return slotId
 }
 
 export default App

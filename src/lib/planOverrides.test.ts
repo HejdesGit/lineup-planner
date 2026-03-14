@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { applyPeriodOverrides, createBoardAssignments, swapBoardAssignments } from './planOverrides'
+import {
+  applyPeriodOverrides,
+  createBoardAssignments,
+  getBoardBenchSlots,
+  swapBoardAssignments,
+} from './planOverrides'
 import { generateMatchPlan } from './scheduler'
 import type { Player } from './types'
 
@@ -79,5 +84,46 @@ describe('applyPeriodOverrides', () => {
 
     expect(vbPlayerId).toBe(period.startingLineup.VM)
     expect(vmPlayerId).toBe(period.startingLineup.VB)
+  })
+
+  it('lets a start-bench player swap into the starting lineup', () => {
+    const players = createPlayers(10)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 10,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 7331,
+      attempts: 16,
+    })
+
+    const period = plan.periods[0]
+    const originalAssignments = createBoardAssignments(period)
+    const [benchSlot] = getBoardBenchSlots(originalAssignments)
+
+    expect(benchSlot).toBeDefined()
+
+    const benchPlayerId = originalAssignments[benchSlot]
+    const originalMidfielderId = period.startingLineup.VM!
+    const overriddenAssignments = swapBoardAssignments(originalAssignments, 'VM', benchSlot)
+    const overriddenPlan = applyPeriodOverrides(plan, {
+      [period.period]: overriddenAssignments,
+    })
+
+    expect(overriddenPlan.periods[0].startingLineup.VM).toBe(benchPlayerId)
+    expect(overriddenPlan.periods[0].chunks[0].lineup.VM).toBe(benchPlayerId)
+    expect(overriddenPlan.periods[0].chunks[0].activePlayerIds).toContain(benchPlayerId)
+    expect(overriddenPlan.periods[0].chunks[0].activePlayerIds).not.toContain(originalMidfielderId)
+
+    const swappedInSummary = overriddenPlan.summaries.find(
+      (summary) => summary.playerId === benchPlayerId,
+    )
+    const swappedOutSummary = overriddenPlan.summaries.find(
+      (summary) => summary.playerId === originalMidfielderId,
+    )
+
+    expect(swappedInSummary?.positionsPlayed).toContain('VM')
+    expect(swappedOutSummary?.benchMinutes).toBeGreaterThan(0)
   })
 })

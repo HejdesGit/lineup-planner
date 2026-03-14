@@ -15,7 +15,7 @@ describe('App', () => {
     await user.selectOptions(screen.getByLabelText(/spelfönster/i), '7')
     await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Ada')
     await user.selectOptions(screen.getByLabelText(/målvakt period 2/i), 'Gio')
-    await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
+    await user.click(screen.getAllByRole('button', { name: /generera uppställning/i }).at(-1)!)
 
     expect((await screen.findAllByText(/period 1/i)).length).toBeGreaterThan(0)
     expect(screen.getAllByText('3-2-1').length).toBeGreaterThan(0)
@@ -33,5 +33,22 @@ describe('App', () => {
     const lockedButton = screen.getByRole('button', { name: /lås upp henry på vm/i })
     expect(lockedButton).toBeInTheDocument()
     expect(lockedButton).toHaveTextContent(/låst/i)
+  })
+
+  it('locks manually selected goalkeepers by default', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const textarea = screen.getByLabelText(/spelare/i)
+    await user.clear(textarea)
+    await user.type(textarea, 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo\nIris')
+    await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Ada')
+    await user.selectOptions(screen.getByLabelText(/målvakt period 2/i), 'Bea')
+    await user.selectOptions(screen.getByLabelText(/målvakt period 3/i), 'Cleo')
+    await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
+
+    expect(await screen.findByRole('button', { name: /lås upp ada på mv/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /lås upp bea på mv/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /lås upp cleo på mv/i })).toBeInTheDocument()
   })
 })

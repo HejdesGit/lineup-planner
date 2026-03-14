@@ -8,8 +8,10 @@ import {
 } from './types'
 
 export const GOALKEEPER_SLOT = 'MV' as const
+export const BENCH_SLOT_PREFIX = 'B' as const
 
-export type BoardSlotId = OutfieldPosition | typeof GOALKEEPER_SLOT
+export type BenchSlotId = `${typeof BENCH_SLOT_PREFIX}${number}`
+export type BoardSlotId = OutfieldPosition | typeof GOALKEEPER_SLOT | BenchSlotId
 export type PeriodBoardOverrides = Partial<Record<number, Record<BoardSlotId, string>>>
 
 export function createBoardAssignments(period: PeriodPlan): Record<BoardSlotId, string> {
@@ -18,6 +20,9 @@ export function createBoardAssignments(period: PeriodPlan): Record<BoardSlotId, 
       period.positions.map((position) => [position, period.startingLineup[position] ?? '']),
     ),
     [GOALKEEPER_SLOT]: period.goalkeeperId,
+    ...Object.fromEntries(
+      getStartBenchPlayerIds(period).map((playerId, index) => [getBenchSlotId(index), playerId]),
+    ),
   } as Record<BoardSlotId, string>
 }
 
@@ -40,6 +45,60 @@ export function swapBoardAssignments(
     [sourceSlot]: boardAssignments[targetSlot],
     [targetSlot]: boardAssignments[sourceSlot],
   }
+}
+
+export function getBenchSlotId(index: number): BenchSlotId {
+  return `${BENCH_SLOT_PREFIX}${index + 1}` as BenchSlotId
+}
+
+export function isBenchSlot(slotId: string): slotId is BenchSlotId {
+  return slotId.startsWith(BENCH_SLOT_PREFIX)
+}
+
+export function getBoardBenchSlots(
+  boardAssignments: Partial<Record<BoardSlotId, string>>,
+): BenchSlotId[] {
+  return Object.keys(boardAssignments)
+    .filter(isBenchSlot)
+    .sort((left, right) => getBenchSlotNumber(left) - getBenchSlotNumber(right)) as BenchSlotId[]
+}
+
+function getBenchSlotNumber(slotId: BenchSlotId) {
+  return Number(slotId.slice(BENCH_SLOT_PREFIX.length))
+}
+
+function getStartBenchPlayerIds(period: PeriodPlan) {
+  const firstChunk = period.chunks[0]
+
+  if (!firstChunk) {
+    return []
+  }
+
+  const firstChunkActiveIds = new Set(firstChunk.activePlayerIds)
+  return collectPeriodPlayerIds(period).filter((playerId) => !firstChunkActiveIds.has(playerId))
+}
+
+function collectPeriodPlayerIds(period: PeriodPlan) {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+
+  for (const chunk of period.chunks) {
+    for (const playerId of [
+      chunk.goalkeeperId,
+      ...chunk.activePlayerIds,
+      ...chunk.substitutions.flatMap((substitution) => [
+        substitution.playerInId,
+        substitution.playerOutId,
+      ]),
+    ]) {
+      if (!seen.has(playerId)) {
+        seen.add(playerId)
+        ordered.push(playerId)
+      }
+    }
+  }
+
+  return ordered
 }
 
 export function applyPeriodOverrides(
