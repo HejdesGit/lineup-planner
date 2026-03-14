@@ -51,9 +51,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
     (parsed.pm !== 15 && parsed.pm !== 20) ||
     !(parsed.f && parsed.f in FORMATION_PRESETS) ||
     typeof parsed.cm !== 'number' ||
-    !Number.isInteger(parsed.cm) ||
-    parsed.cm < 5 ||
-    parsed.cm > 10 ||
+    !isValidChunkMinutes(parsed.cm) ||
     !Array.isArray(parsed.gk) ||
     parsed.gk.length !== PERIOD_COUNT ||
     !parsed.gk.every((selection) => typeof selection === 'string') ||
@@ -85,6 +83,10 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
     },
     overrides: parsed.o ?? {},
   }
+}
+
+function isValidChunkMinutes(chunkMinutes: number) {
+  return chunkMinutes >= 5 && chunkMinutes <= 10 && Number.isInteger(chunkMinutes * 2)
 }
 
 export function buildLineupShareUrl(encodedSnapshot: string, currentUrl: string) {

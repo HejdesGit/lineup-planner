@@ -26,7 +26,7 @@ function buildSharedLineupFixture() {
     playerNames: names,
     periodMinutes: 20,
     formation: '3-2-1',
-    chunkMinutes: 7,
+    chunkMinutes: 6.5,
     goalkeeperSelections: ['Ada', 'Gio', ''],
     seed: 9001,
   }
@@ -61,7 +61,7 @@ async function generateCustomPlan() {
   await user.clear(textarea)
   await user.type(textarea, 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo\nIris')
   await user.selectOptions(screen.getByLabelText(/formation/i), '3-2-1')
-  await user.selectOptions(screen.getByLabelText(/spelfönster/i), '7')
+  await user.selectOptions(screen.getByLabelText(/spelfönster/i), '10')
   await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Ada')
   await user.selectOptions(screen.getByLabelText(/målvakt period 2/i), 'Gio')
   await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
@@ -104,7 +104,7 @@ describe('App', () => {
 
     expect((await screen.findAllByText(/period 1/i)).length).toBeGreaterThan(0)
     expect(screen.getAllByText('3-2-1').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/var 7:e min/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/var 10:e min/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/MV: Ada/i)).toBeInTheDocument()
     expect(screen.getByText(/speltid per spelare/i)).toBeInTheDocument()
   })
@@ -116,13 +116,39 @@ describe('App', () => {
     expect(screen.getByText(/kan väntan bli lång/i)).toBeInTheDocument()
   })
 
+  it('shows curated chunk options for 3x20 and 3x15', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const chunkSelect = screen.getByLabelText(/spelfönster/i)
+
+    expect(within(chunkSelect).getByRole('option', { name: '5 minuter (5+5+5+5)' })).toBeInTheDocument()
+    expect(within(chunkSelect).getByRole('option', { name: '10 minuter (10+10)' })).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText(/matchformat/i), '15')
+
+    expect(within(chunkSelect).getByRole('option', { name: '5 minuter (5+5+5)' })).toBeInTheDocument()
+    expect(within(chunkSelect).getByRole('option', { name: '7,5 minuter (7,5+7,5)' })).toBeInTheDocument()
+  })
+
+  it('normalizes spelfönster when matchformat changes to a different option set', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByLabelText(/spelfönster/i)).toHaveValue('10')
+
+    await user.selectOptions(screen.getByLabelText(/matchformat/i), '15')
+
+    expect(screen.getByLabelText(/spelfönster/i)).toHaveValue('5')
+  })
+
   it('hides the chunk recommendation for shorter windows in smaller rosters', async () => {
     const user = userEvent.setup()
     render(<App />)
 
     await user.clear(screen.getByLabelText(/spelare/i))
     await user.type(screen.getByLabelText(/spelare/i), 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo')
-    await user.selectOptions(screen.getByLabelText(/spelfönster/i), '7')
+    await user.selectOptions(screen.getByLabelText(/spelfönster/i), '5')
 
     expect(screen.queryByText(/kan väntan bli lång/i)).not.toBeInTheDocument()
   })
@@ -179,7 +205,7 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getAllByText('3-2-1').length).toBeGreaterThan(0)
-    expect(screen.getByLabelText(/spelfönster/i)).toHaveValue('7')
+    expect(screen.getByLabelText(/spelfönster/i)).toHaveValue('6.5')
     expect(screen.getByLabelText(/målvakt period 1/i)).toHaveValue('Ada')
     expect(screen.getByLabelText(/målvakt period 2/i)).toHaveValue('Gio')
     expect(

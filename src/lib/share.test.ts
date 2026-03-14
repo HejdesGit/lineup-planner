@@ -9,7 +9,7 @@ describe('share codec', () => {
       playerNames: ['Åke', 'Örjan', 'Älva', 'Nils', 'Moa', 'Linn', 'Bo', 'Ebbe'],
       periodMinutes: 20,
       formation: '2-3-1',
-      chunkMinutes: 10,
+      chunkMinutes: 7.5,
       goalkeeperSelections: ['Åke', '', 'Örjan'],
       seed: 424242,
     }

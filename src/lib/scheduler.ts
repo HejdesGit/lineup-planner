@@ -316,8 +316,8 @@ function validateConfig(
     throw new Error('Formationen stöds inte.')
   }
 
-  if (!Number.isInteger(chunkMinutes) || chunkMinutes < 5 || chunkMinutes > 10) {
-    throw new Error('Bytesfönstret måste vara ett heltal mellan 5 och 10 minuter.')
+  if (!isValidChunkMinutes(chunkMinutes)) {
+    throw new Error('Bytesfönstret måste vara mellan 5 och 10 minuter i hela eller halva minuter.')
   }
 
   if (lockedGoalkeeperIds && lockedGoalkeeperIds.length !== PERIOD_COUNT) {
@@ -607,6 +607,10 @@ function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchCh
   }
 
   return chunks
+}
+
+function isValidChunkMinutes(chunkMinutes: number) {
+  return chunkMinutes >= 5 && chunkMinutes <= 10 && Number.isInteger(chunkMinutes * 2)
 }
 
 function createHistories(players: Player[], goalkeepers: string[]): Record<string, PlayerHistory> {

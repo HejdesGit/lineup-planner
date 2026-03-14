@@ -105,6 +105,10 @@ const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 10
 const DEFAULT_SHARE_SEED = 20260314
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
+const CHUNK_MINUTE_OPTIONS_BY_PERIOD = {
+  15: [5, 7.5],
+  20: [5, 10],
+} as const
 
 interface FormState {
   playerInput: string
@@ -146,7 +150,11 @@ function formReducer(state: FormState, action: FormAction): FormState {
     case 'setPlayerInput':
       return { ...state, playerInput: action.value }
     case 'setPeriodMinutes':
-      return { ...state, periodMinutes: action.value }
+      return {
+        ...state,
+        periodMinutes: action.value,
+        chunkMinutes: getNormalizedChunkMinutes(action.value, state.chunkMinutes),
+      }
     case 'setFormation':
       return { ...state, formation: action.value }
     case 'setChunkMinutes':
@@ -361,6 +369,7 @@ function SettingsPanel({
   onShareViaWhatsApp: () => void
 }) {
   const showChunkRecommendation = rosterCount >= 10 && state.chunkMinutes >= 10
+  const chunkMinuteOptions = getChunkMinuteOptions(state.periodMinutes, state.chunkMinutes)
 
   return (
     <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
@@ -464,9 +473,9 @@ function SettingsPanel({
               value={state.chunkMinutes}
               onChange={(event) => dispatch({ type: 'setChunkMinutes', value: Number(event.target.value) })}
             >
-              {Array.from({ length: 6 }, (_, index) => 5 + index).map((value) => (
-                <option key={value} value={value}>
-                  {value} minuter
+              {chunkMinuteOptions.map((option) => (
+                <option key={`${state.periodMinutes}-${option.value}`} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </SelectControl>
@@ -477,8 +486,8 @@ function SettingsPanel({
                 Rekommendation
               </p>
               <p className="mt-1">
-                Med {rosterCount} spelare och {state.chunkMinutes}-minutersfönster kan väntan bli
-                lång. Prova gärna 5 till 7 minuter om du vill korta bänkpassen.
+                Med {rosterCount} spelare och {formatMinuteValue(state.chunkMinutes)}-minutersfönster kan väntan bli
+                lång. Prova gärna 5 till 7,5 minuter om du vill korta bänkpassen.
               </p>
             </div>
           ) : null}
@@ -572,7 +581,7 @@ function MatchOverview({
         />
         <SummaryChip label="Formation" value={plan.formation} />
         <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
-        <SummaryChip label="Byten" value={`var ${plan.chunkMinutes}:e min`} />
+        <SummaryChip label="Byten" value={`var ${formatMinuteValue(plan.chunkMinutes)}:e min`} />
         <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
       </div>
     </section>
@@ -1695,6 +1704,44 @@ function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinut
     outfieldMinutes,
     totalMinutes: summary.totalMinutes,
   }
+}
+
+function getChunkMinuteOptions(periodMinutes: 15 | 20, currentChunkMinutes?: number) {
+  const recommendedValues = [...CHUNK_MINUTE_OPTIONS_BY_PERIOD[periodMinutes]] as number[]
+  const values =
+    typeof currentChunkMinutes === 'number' && !recommendedValues.includes(currentChunkMinutes)
+      ? [...recommendedValues, currentChunkMinutes].sort((left, right) => left - right)
+      : recommendedValues
+
+  return values.map((value) => ({
+    value,
+    label: `${formatMinuteValue(value)} minuter (${formatChunkPattern(periodMinutes, value)})`,
+  }))
+}
+
+function getNormalizedChunkMinutes(periodMinutes: 15 | 20, currentChunkMinutes: number) {
+  const recommendedValues = CHUNK_MINUTE_OPTIONS_BY_PERIOD[periodMinutes] as readonly number[]
+
+  return recommendedValues.includes(currentChunkMinutes)
+    ? currentChunkMinutes
+    : recommendedValues[0]
+}
+
+function formatChunkPattern(periodMinutes: 15 | 20, chunkMinutes: number) {
+  const windows: number[] = []
+  let remainingMinutes = periodMinutes
+
+  while (remainingMinutes > 0) {
+    const windowMinutes = Math.min(chunkMinutes, remainingMinutes)
+    windows.push(windowMinutes)
+    remainingMinutes -= windowMinutes
+  }
+
+  return windows.map((value) => formatMinuteValue(value)).join('+')
+}
+
+function formatMinuteValue(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1).replace('.', ',')
 }
 
 function getRosterNames(input: string) {
