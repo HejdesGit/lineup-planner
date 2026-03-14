@@ -1257,7 +1257,7 @@ function PositionBadgeCard({
             event.stopPropagation()
             onToggleLock()
           }}
-          className={`absolute right-1.5 top-1.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur sm:right-2 sm:top-2 sm:h-9 sm:w-9 ${
+          className={`absolute -right-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur sm:-right-2.5 sm:-top-2.5 sm:h-9 sm:w-9 ${
             locked
               ? 'border-clay-200/50 bg-clay-400/25 text-clay-50 shadow-[0_0_0_1px_rgba(251,191,36,0.1)]'
               : 'border-white/10 bg-black/20 text-stone-300 hover:border-white/20 hover:text-white'
@@ -1265,9 +1265,9 @@ function PositionBadgeCard({
           aria-label={locked ? `Lås upp ${player} på ${label}` : `Lås ${player} på ${label}`}
         >
           {locked ? (
-            <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <Lock className="h-3 w-3 sm:h-4 sm:w-4" />
           ) : (
-            <LockOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <LockOpen className="h-3 w-3 sm:h-4 sm:w-4" />
           )}
         </button>
       ) : null}
