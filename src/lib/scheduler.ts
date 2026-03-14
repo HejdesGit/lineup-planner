@@ -1,0 +1,1068 @@
+import {
+  ALL_POSITIONS,
+  FORMATION_PRESETS,
+  PERIOD_COUNT,
+  ROLE_GROUPS,
+  type ChunkSubstitution,
+  type FormationKey,
+  type Lineup,
+  type MatchConfig,
+  type MatchPlan,
+  type OutfieldPosition,
+  type PeriodPlan,
+  type Player,
+  type PlayerSummary,
+  type RoleGroup,
+} from './types'
+
+interface RotationSnapshot {
+  lastOutfieldPosition: OutfieldPosition | null
+  lastOutfieldGroup: RoleGroup | null
+  groupCounts: Partial<Record<RoleGroup, number>>
+  positionCounts: Partial<Record<OutfieldPosition, number>>
+  groupsPlayed: readonly RoleGroup[]
+  positionsPlayed: readonly OutfieldPosition[]
+}
+
+type RotationPhase = 'period-start' | 'in-period'
+
+interface MatchChunk {
+  chunkIndex: number
+  periodIndex: number
+  windowIndex: number
+  startMinute: number
+  endMinute: number
+  durationMinutes: number
+}
+
+interface PlayerHistory {
+  actualMinutes: number
+  outfieldMinutes: number
+  benchMinutes: number
+  playStreak: number
+  benchStreak: number
+  consecutiveBenchViolations: number
+  benchViolationWeight: number
+  maxBenchStreak: number
+  goalkeeperPeriods: number[]
+  lastOutfieldPosition: OutfieldPosition | null
+  lastOutfieldGroup: RoleGroup | null
+  groupCounts: Record<RoleGroup, number>
+  positionCounts: Record<OutfieldPosition, number>
+  groupsPlayed: Set<RoleGroup>
+  positionsPlayed: Set<OutfieldPosition>
+  samePositionRepeats: number
+  sameGroupRepeats: number
+  periodStarts: number
+  periodBenchStarts: number
+  startedPreviousPeriod: boolean
+  benchedPreviousPeriod: boolean
+  lastStartPosition: OutfieldPosition | null
+  lastStartGroup: RoleGroup | null
+  startGroupCounts: Record<RoleGroup, number>
+  startPositionCounts: Record<OutfieldPosition, number>
+  startGroupsPlayed: Set<RoleGroup>
+  startPositionsPlayed: Set<OutfieldPosition>
+  sameStartPositionRepeats: number
+  sameStartGroupRepeats: number
+  repeatedStartPeriods: number
+  repeatedBenchStartPeriods: number
+}
+
+interface CandidatePlan {
+  score: number
+  periods: PeriodPlan[]
+  summaries: PlayerSummary[]
+  targets: Record<string, number>
+  goalkeepers: string[]
+}
+
+interface AssignmentResult {
+  lineup: Lineup
+  substitutions: ChunkSubstitution[]
+}
+
+const DEFAULT_ATTEMPTS = 72
+
+function getRoleGroup(position: OutfieldPosition): RoleGroup {
+  return ROLE_GROUPS[position]
+}
+
+export function scoreOutfieldPosition(
+  snapshot: RotationSnapshot,
+  position: OutfieldPosition,
+  phase: RotationPhase = 'in-period',
+): number {
+  const nextGroup = getRoleGroup(position)
+  const groupsPlayed = new Set(snapshot.groupsPlayed)
+  const positionsPlayed = new Set(snapshot.positionsPlayed)
+  const groupCost = scoreGroupRotation(snapshot, nextGroup, groupsPlayed, phase)
+  const positionCost = scoreWithinGroupPosition(snapshot, position, positionsPlayed, phase)
+
+  return groupCost + positionCost
+}
+
+function scoreGroupRotation(
+  snapshot: RotationSnapshot,
+  nextGroup: RoleGroup,
+  groupsPlayed: Set<RoleGroup>,
+  phase: RotationPhase,
+) {
+  let cost = 0
+
+  const sameGroupPenalty = phase === 'period-start' ? 18 : 12
+  const differentGroupBonus = phase === 'period-start' ? 9 : 6
+  const newGroupBonus = phase === 'period-start' ? 12 : 8
+  const oneGroupBreadthBonus = phase === 'period-start' ? 8 : 5
+  const twoGroupBreadthBonus = phase === 'period-start' ? 4 : 2
+  const groupCountWeight = phase === 'period-start' ? 2.5 : 1.85
+
+  if (snapshot.lastOutfieldGroup === nextGroup) {
+    cost += sameGroupPenalty
+  } else if (snapshot.lastOutfieldGroup) {
+    cost -= differentGroupBonus
+  }
+
+  if (!groupsPlayed.has(nextGroup)) {
+    cost -= newGroupBonus
+  }
+
+  if (groupsPlayed.size === 1 && !groupsPlayed.has(nextGroup)) {
+    cost -= oneGroupBreadthBonus
+  }
+
+  if (groupsPlayed.size === 2 && !groupsPlayed.has(nextGroup)) {
+    cost -= twoGroupBreadthBonus
+  }
+
+  cost += (snapshot.groupCounts[nextGroup] ?? 0) * groupCountWeight
+
+  return cost
+}
+
+function scoreWithinGroupPosition(
+  snapshot: RotationSnapshot,
+  position: OutfieldPosition,
+  positionsPlayed: Set<OutfieldPosition>,
+  phase: RotationPhase,
+) {
+  let cost = 0
+  const samePositionPenalty = phase === 'period-start' ? 2 : 3
+  const newPositionBonus = phase === 'period-start' ? 0.35 : 0.5
+  const positionCountWeight = phase === 'period-start' ? 0.05 : 0.1
+
+  if (snapshot.lastOutfieldPosition === position) {
+    cost += samePositionPenalty
+  }
+
+  if (!positionsPlayed.has(position)) {
+    cost -= newPositionBonus
+  }
+
+  cost += (snapshot.positionCounts[position] ?? 0) * positionCountWeight
+
+  return cost
+}
+
+export function generateMatchPlan({
+  players,
+  periodMinutes,
+  formation,
+  chunkMinutes,
+  lockedGoalkeeperIds,
+  seed = Date.now(),
+  attempts = DEFAULT_ATTEMPTS,
+}: MatchConfig): MatchPlan {
+  validateConfig(players, periodMinutes, formation, chunkMinutes, lockedGoalkeeperIds)
+
+  let best: CandidatePlan | null = null
+  let bestSeed = seed
+
+  for (let index = 0; index < attempts; index += 1) {
+    const candidateSeed = (seed + index * 7919) >>> 0
+    const candidate = buildCandidatePlan(
+      players,
+      periodMinutes,
+      formation,
+      chunkMinutes,
+      lockedGoalkeeperIds,
+      candidateSeed,
+    )
+    if (!candidate) {
+      continue
+    }
+
+    if (!best || candidate.score < best.score) {
+      best = candidate
+      bestSeed = candidateSeed
+    }
+  }
+
+  if (!best) {
+    throw new Error('Kunde inte skapa ett giltigt matchschema.')
+  }
+
+  return {
+    seed: bestSeed,
+    score: best.score,
+    formation,
+    chunkMinutes,
+    periodMinutes,
+    positions: FORMATION_PRESETS[formation].positions,
+    goalkeepers: best.goalkeepers,
+    lockedGoalkeepers: normalizeLockedGoalkeepers(lockedGoalkeeperIds),
+    targets: best.targets,
+    periods: best.periods,
+    summaries: best.summaries,
+  }
+}
+
+function validateConfig(
+  players: Player[],
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
+  lockedGoalkeeperIds?: Array<string | null>,
+) {
+  if (players.length < 8 || players.length > 12) {
+    throw new Error('Antalet spelare måste vara mellan 8 och 12.')
+  }
+
+  if (periodMinutes !== 15 && periodMinutes !== 20) {
+    throw new Error('Matchtiden måste vara 15 eller 20 minuter per period.')
+  }
+
+  if (!(formation in FORMATION_PRESETS)) {
+    throw new Error('Formationen stöds inte.')
+  }
+
+  if (!Number.isInteger(chunkMinutes) || chunkMinutes < 5 || chunkMinutes > 10) {
+    throw new Error('Bytesfönstret måste vara ett heltal mellan 5 och 10 minuter.')
+  }
+
+  if (lockedGoalkeeperIds && lockedGoalkeeperIds.length !== PERIOD_COUNT) {
+    throw new Error('Målvaktsval måste anges för exakt tre perioder.')
+  }
+
+  if (lockedGoalkeeperIds) {
+    const selectedGoalkeepers = lockedGoalkeeperIds.filter(
+      (goalkeeperId): goalkeeperId is string => Boolean(goalkeeperId),
+    )
+    if (new Set(selectedGoalkeepers).size !== selectedGoalkeepers.length) {
+      throw new Error('Välj tre olika målvakter om du låser perioderna manuellt.')
+    }
+
+    for (const goalkeeperId of selectedGoalkeepers) {
+      if (!players.some((player) => player.id === goalkeeperId)) {
+        throw new Error('En vald målvakt finns inte i spelarlistan.')
+      }
+    }
+  }
+}
+
+function buildCandidatePlan(
+  players: Player[],
+  periodMinutes: 15 | 20,
+  formation: FormationKey,
+  chunkMinutes: number,
+  lockedGoalkeeperIds: Array<string | null> | undefined,
+  seed: number,
+): CandidatePlan | null {
+  const rng = createRng(seed)
+  const positions = FORMATION_PRESETS[formation].positions
+  const matchChunks = buildMatchChunks(periodMinutes, chunkMinutes)
+  const totalPlayerMinutes = PERIOD_COUNT * periodMinutes * 7
+  const playerIds = players.map((player) => player.id)
+  const nameById = Object.fromEntries(players.map((player) => [player.id, player.name]))
+  const targets = distributeTargetMinutes(playerIds, totalPlayerMinutes, rng)
+  const goalkeepers = resolveGoalkeepers(playerIds, normalizeLockedGoalkeepers(lockedGoalkeeperIds), rng)
+  const goalkeeperMinuteCounts = Object.fromEntries(playerIds.map((id) => [id, 0])) as Record<
+    string,
+    number
+  >
+
+  for (const goalkeeperId of goalkeepers) {
+    goalkeeperMinuteCounts[goalkeeperId] += periodMinutes
+  }
+
+  const outfieldTargets = Object.fromEntries(
+    playerIds.map((id) => [id, Math.max(0, targets[id] - goalkeeperMinuteCounts[id])]),
+  ) as Record<string, number>
+  const remainingEligibleByPlayer = buildRemainingEligibleLookup(playerIds, matchChunks, goalkeepers)
+  const histories = createHistories(players, goalkeepers)
+  const periods: PeriodPlan[] = []
+
+  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+    const goalkeeperId = goalkeepers[periodIndex]
+    const chunks = []
+    const substituteSet = new Set<string>()
+    const periodChunks = matchChunks.filter((chunk) => chunk.periodIndex === periodIndex)
+    let previousLineup: Lineup | null = null
+
+    for (const chunk of periodChunks) {
+      const phase: RotationPhase = chunk.windowIndex === 0 ? 'period-start' : 'in-period'
+      const outfieldPlayers = selectOutfieldPlayers({
+        chunk,
+        playerIds,
+        goalkeeperId,
+        histories,
+        outfieldTargets,
+        remainingEligibleByPlayer,
+        positions,
+        phase,
+        rng,
+      })
+
+      if (!outfieldPlayers) {
+        return null
+      }
+
+      const assignmentResult: AssignmentResult =
+        phase === 'period-start' || !previousLineup
+          ? {
+              lineup: assignBestPositions(outfieldPlayers, positions, histories, phase),
+              substitutions: [],
+            }
+          : assignInPeriodLineup(outfieldPlayers, previousLineup, positions, histories)
+      const assignment = assignmentResult.lineup
+      const activePlayerIds = [goalkeeperId, ...positions.map((position) => getLineupPlayer(assignment, position))]
+      const activeSet = new Set(activePlayerIds)
+
+      for (const playerId of playerIds) {
+        const history = histories[playerId]
+        if (activeSet.has(playerId)) {
+          history.actualMinutes += chunk.durationMinutes
+          history.playStreak += 1
+          history.benchStreak = 0
+        } else {
+          const nextBenchStreak = history.benchStreak + 1
+          if (history.benchStreak > 0) {
+            history.consecutiveBenchViolations += 1
+            history.benchViolationWeight += nextBenchStreak
+          }
+          history.benchMinutes += chunk.durationMinutes
+          history.playStreak = 0
+          history.benchStreak = nextBenchStreak
+          history.maxBenchStreak = Math.max(history.maxBenchStreak, nextBenchStreak)
+          substituteSet.add(playerId)
+        }
+      }
+
+      if (phase === 'period-start') {
+        updatePeriodStartHistory(playerIds, goalkeeperId, activeSet, positions, assignment, histories)
+      }
+
+      for (const position of positions) {
+        const playerId = getLineupPlayer(assignment, position)
+        const history = histories[playerId]
+        const group = getRoleGroup(position)
+
+        if (history.lastOutfieldPosition === position) {
+          history.samePositionRepeats += 1
+        }
+        if (history.lastOutfieldGroup === group) {
+          history.sameGroupRepeats += 1
+        }
+
+        history.outfieldMinutes += chunk.durationMinutes
+        history.lastOutfieldPosition = position
+        history.lastOutfieldGroup = group
+        history.positionCounts[position] += chunk.durationMinutes
+        history.groupCounts[group] += chunk.durationMinutes
+        history.positionsPlayed.add(position)
+        history.groupsPlayed.add(group)
+      }
+
+      chunks.push({
+        chunkIndex: chunk.chunkIndex,
+        period: periodIndex + 1,
+        windowIndex: chunk.windowIndex,
+        startMinute: chunk.startMinute,
+        endMinute: chunk.endMinute,
+        durationMinutes: chunk.durationMinutes,
+        goalkeeperId,
+        goalkeeperName: nameById[goalkeeperId],
+        lineup: assignment,
+        activePlayerIds,
+        substitutes: playerIds
+          .filter((playerId) => !activeSet.has(playerId))
+          .map((playerId) => nameById[playerId]),
+        substitutions: assignmentResult.substitutions,
+      })
+
+      previousLineup = assignment
+    }
+
+    periods.push({
+      period: periodIndex + 1,
+      formation,
+      positions,
+      goalkeeperId,
+      goalkeeperName: nameById[goalkeeperId],
+      startingLineup: chunks[0].lineup,
+      chunks,
+      substitutes: Array.from(substituteSet).map((playerId) => nameById[playerId]),
+    })
+  }
+
+  const summaries = players.map((player) => {
+    const history = histories[player.id]
+    return {
+      playerId: player.id,
+      name: player.name,
+      totalMinutes: history.actualMinutes,
+      benchMinutes: history.benchMinutes,
+      goalkeeperPeriods: [...history.goalkeeperPeriods],
+      positionsPlayed: ALL_POSITIONS.filter((position) => history.positionsPlayed.has(position)),
+      roleGroups: (['DEF', 'MID', 'ATT'] as RoleGroup[]).filter((group) =>
+        history.groupsPlayed.has(group),
+      ),
+    }
+  })
+
+  return {
+    score: scoreCandidate(targets, histories, periods),
+    periods,
+    summaries,
+    targets,
+    goalkeepers,
+  }
+}
+
+function normalizeLockedGoalkeepers(lockedGoalkeeperIds?: Array<string | null>) {
+  return Array.from({ length: PERIOD_COUNT }, (_, index) => lockedGoalkeeperIds?.[index] ?? null)
+}
+
+function resolveGoalkeepers(
+  playerIds: string[],
+  lockedGoalkeeperIds: Array<string | null>,
+  rng: () => number,
+) {
+  const chosen = [...lockedGoalkeeperIds]
+  const usedIds = new Set(chosen.filter((goalkeeperId): goalkeeperId is string => Boolean(goalkeeperId)))
+  const remainingIds = shuffle(
+    playerIds.filter((playerId) => !usedIds.has(playerId)),
+    rng,
+  )
+
+  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+    if (chosen[periodIndex]) {
+      continue
+    }
+
+    const nextGoalkeeper = remainingIds.shift()
+    if (!nextGoalkeeper) {
+      throw new Error('Det finns inte tillräckligt många spelare för att välja tre olika målvakter.')
+    }
+    chosen[periodIndex] = nextGoalkeeper
+  }
+
+  return chosen as string[]
+}
+
+function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchChunk[] {
+  const chunks: MatchChunk[] = []
+  let chunkIndex = 0
+
+  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+    let cursor = 0
+    let windowIndex = 0
+
+    while (cursor < periodMinutes) {
+      const nextCursor = Math.min(cursor + chunkMinutes, periodMinutes)
+      chunks.push({
+        chunkIndex,
+        periodIndex,
+        windowIndex,
+        startMinute: cursor,
+        endMinute: nextCursor,
+        durationMinutes: nextCursor - cursor,
+      })
+      cursor = nextCursor
+      windowIndex += 1
+      chunkIndex += 1
+    }
+  }
+
+  return chunks
+}
+
+function createHistories(players: Player[], goalkeepers: string[]): Record<string, PlayerHistory> {
+  return Object.fromEntries(
+    players.map((player) => [
+      player.id,
+      {
+        actualMinutes: 0,
+        outfieldMinutes: 0,
+        benchMinutes: 0,
+        playStreak: 0,
+        benchStreak: 0,
+        consecutiveBenchViolations: 0,
+        benchViolationWeight: 0,
+        maxBenchStreak: 0,
+        goalkeeperPeriods: goalkeepers
+          .map((goalkeeperId, index) => (goalkeeperId === player.id ? index + 1 : null))
+          .filter((value): value is number => value !== null),
+        lastOutfieldPosition: null,
+        lastOutfieldGroup: null,
+        groupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        positionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        groupsPlayed: new Set<RoleGroup>(),
+        positionsPlayed: new Set<OutfieldPosition>(),
+        samePositionRepeats: 0,
+        sameGroupRepeats: 0,
+        periodStarts: 0,
+        periodBenchStarts: 0,
+        startedPreviousPeriod: false,
+        benchedPreviousPeriod: false,
+        lastStartPosition: null,
+        lastStartGroup: null,
+        startGroupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        startPositionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        startGroupsPlayed: new Set<RoleGroup>(),
+        startPositionsPlayed: new Set<OutfieldPosition>(),
+        sameStartPositionRepeats: 0,
+        sameStartGroupRepeats: 0,
+        repeatedStartPeriods: 0,
+        repeatedBenchStartPeriods: 0,
+      },
+    ]),
+  )
+}
+
+function buildRemainingEligibleLookup(
+  playerIds: string[],
+  matchChunks: MatchChunk[],
+  goalkeepers: string[],
+) {
+  const lookup: Record<string, number[]> = {}
+
+  for (const playerId of playerIds) {
+    const remaining: number[] = Array.from({ length: matchChunks.length }, () => 0)
+    let running = 0
+
+    for (let chunkIndex = matchChunks.length - 1; chunkIndex >= 0; chunkIndex -= 1) {
+      const chunk = matchChunks[chunkIndex]
+      if (goalkeepers[chunk.periodIndex] !== playerId) {
+        running += chunk.durationMinutes
+      }
+      remaining[chunkIndex] = running
+    }
+
+    lookup[playerId] = remaining
+  }
+
+  return lookup
+}
+
+function selectOutfieldPlayers({
+  chunk,
+  playerIds,
+  goalkeeperId,
+  histories,
+  outfieldTargets,
+  remainingEligibleByPlayer,
+  positions,
+  phase,
+  rng,
+}: {
+  chunk: MatchChunk
+  playerIds: string[]
+  goalkeeperId: string
+  histories: Record<string, PlayerHistory>
+  outfieldTargets: Record<string, number>
+  remainingEligibleByPlayer: Record<string, number[]>
+  positions: readonly OutfieldPosition[]
+  phase: RotationPhase
+  rng: () => number
+}) {
+  if (phase === 'period-start') {
+    return selectPeriodStarters({
+      chunk,
+      playerIds,
+      goalkeeperId,
+      histories,
+      outfieldTargets,
+      remainingEligibleByPlayer,
+      positions,
+      rng,
+    })
+  }
+
+  return selectInPeriodPlayers({
+    chunk,
+    playerIds,
+    goalkeeperId,
+    histories,
+    outfieldTargets,
+    remainingEligibleByPlayer,
+    positions,
+    rng,
+  })
+}
+
+function selectPeriodStarters({
+  chunk,
+  playerIds,
+  goalkeeperId,
+  histories,
+  outfieldTargets,
+  remainingEligibleByPlayer,
+  positions,
+  rng,
+}: {
+  chunk: MatchChunk
+  playerIds: string[]
+  goalkeeperId: string
+  histories: Record<string, PlayerHistory>
+  outfieldTargets: Record<string, number>
+  remainingEligibleByPlayer: Record<string, number[]>
+  positions: readonly OutfieldPosition[]
+  rng: () => number
+}) {
+  const candidates: Array<{ playerId: string; score: number }> = []
+
+  for (const playerId of playerIds) {
+    if (playerId === goalkeeperId) {
+      continue
+    }
+
+    const history = histories[playerId]
+    const remainingNeed = outfieldTargets[playerId] - history.outfieldMinutes
+    const remainingOpportunities = remainingEligibleByPlayer[playerId][chunk.chunkIndex]
+    const futureAfterCurrent = remainingOpportunities - chunk.durationMinutes
+    const criticalGap = Math.max(remainingNeed - futureAfterCurrent, 0)
+    const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
+    const score =
+      (history.startedPreviousPeriod ? -140 : 75) +
+      (history.benchedPreviousPeriod ? 95 : 0) +
+      history.periodBenchStarts * 30 -
+      history.periodStarts * 22 +
+      history.repeatedBenchStartPeriods * 45 -
+      history.repeatedStartPeriods * 18 +
+      criticalGap * 85 +
+      Math.max(remainingNeed, 0) * 12 +
+      shortagePressure * 24 -
+      history.actualMinutes * 1.2 +
+      rng() * 0.01
+
+    candidates.push({ playerId, score })
+  }
+
+  return selectPlayersWithBenchProtection(candidates, histories, positions.length)
+}
+
+function selectInPeriodPlayers({
+  chunk,
+  playerIds,
+  goalkeeperId,
+  histories,
+  outfieldTargets,
+  remainingEligibleByPlayer,
+  positions,
+  rng,
+}: {
+  chunk: MatchChunk
+  playerIds: string[]
+  goalkeeperId: string
+  histories: Record<string, PlayerHistory>
+  outfieldTargets: Record<string, number>
+  remainingEligibleByPlayer: Record<string, number[]>
+  positions: readonly OutfieldPosition[]
+  rng: () => number
+}) {
+  const candidates: Array<{ playerId: string; score: number }> = []
+
+  for (const playerId of playerIds) {
+    if (playerId === goalkeeperId) {
+      continue
+    }
+
+    const history = histories[playerId]
+    const remainingNeed = outfieldTargets[playerId] - history.outfieldMinutes
+    const remainingOpportunities = remainingEligibleByPlayer[playerId][chunk.chunkIndex]
+    const futureAfterCurrent = remainingOpportunities - chunk.durationMinutes
+    const criticalGap = Math.max(remainingNeed - futureAfterCurrent, 0)
+    const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
+    const score =
+      criticalGap * 100 +
+      Math.max(remainingNeed, 0) * 10 +
+      shortagePressure * 30 +
+      history.benchStreak * 120 -
+      history.playStreak * 10 -
+      history.actualMinutes * 0.35 +
+      rng() * 0.01
+
+    candidates.push({ playerId, score })
+  }
+
+  return selectPlayersWithBenchProtection(candidates, histories, positions.length)
+}
+
+function selectPlayersWithBenchProtection(
+  candidates: Array<{ playerId: string; score: number }>,
+  histories: Record<string, PlayerHistory>,
+  requiredCount: number,
+) {
+  const mandatory = candidates.filter((candidate) => histories[candidate.playerId].benchStreak > 0)
+  const optional = candidates.filter((candidate) => histories[candidate.playerId].benchStreak === 0)
+
+  mandatory.sort((left, right) => right.score - left.score)
+  optional.sort((left, right) => right.score - left.score)
+
+  if (mandatory.length >= requiredCount) {
+    return mandatory.slice(0, requiredCount).map((candidate) => candidate.playerId)
+  }
+
+  const selected = [
+    ...mandatory.map((candidate) => candidate.playerId),
+    ...optional.slice(0, requiredCount - mandatory.length).map((candidate) => candidate.playerId),
+  ]
+
+  return selected.length === requiredCount ? selected : null
+}
+
+function assignBestPositions(
+  selectedPlayerIds: string[],
+  positions: readonly OutfieldPosition[],
+  histories: Record<string, PlayerHistory>,
+  phase: RotationPhase,
+): Lineup {
+  let bestCost = Number.POSITIVE_INFINITY
+  let bestAssignment: Lineup = Object.fromEntries(
+    positions.map((position, index) => [position, selectedPlayerIds[index] ?? selectedPlayerIds[0]]),
+  )
+
+  forEachPermutation(selectedPlayerIds, (permutation) => {
+    let cost = 0
+
+    for (let index = 0; index < positions.length; index += 1) {
+      const playerId = permutation[index]
+      const position = positions[index]
+      const snapshot = buildRotationSnapshot(histories[playerId], phase)
+      cost += scoreOutfieldPosition(
+        snapshot,
+        position,
+        phase,
+      )
+    }
+
+    if (cost < bestCost) {
+      bestCost = cost
+      bestAssignment = Object.fromEntries(
+        positions.map((position, index) => [position, permutation[index]]),
+      )
+    }
+  })
+
+  return bestAssignment
+}
+
+function assignInPeriodLineup(
+  selectedPlayerIds: string[],
+  previousLineup: Lineup,
+  positions: readonly OutfieldPosition[],
+  histories: Record<string, PlayerHistory>,
+): AssignmentResult {
+  const previousAssignments = positions.map((position) => ({
+    position,
+    playerId: getLineupPlayer(previousLineup, position),
+  }))
+  const previousPlayerIds = previousAssignments.map((entry) => entry.playerId)
+  const selectedSet = new Set(selectedPlayerIds)
+  const previousSet = new Set(previousPlayerIds)
+  const outgoingAssignments = previousAssignments.filter((entry) => !selectedSet.has(entry.playerId))
+  const incomingPlayerIds = selectedPlayerIds.filter((playerId) => !previousSet.has(playerId))
+
+  if (incomingPlayerIds.length === 0 && outgoingAssignments.length === 0) {
+    return {
+      lineup: Object.fromEntries(previousAssignments.map((entry) => [entry.position, entry.playerId])),
+      substitutions: [],
+    }
+  }
+
+  if (incomingPlayerIds.length !== outgoingAssignments.length) {
+    throw new Error('Ogiltigt byte: inkommande och utgående spelare matchar inte.')
+  }
+
+  let bestCost = Number.POSITIVE_INFINITY
+  let bestIncomingOrder = [...incomingPlayerIds]
+
+  forEachPermutation(incomingPlayerIds, (permutation) => {
+    let cost = 0
+
+    for (let index = 0; index < outgoingAssignments.length; index += 1) {
+      const incomingPlayerId = permutation[index]
+      const outgoingAssignment = outgoingAssignments[index]
+      const snapshot = buildRotationSnapshot(histories[incomingPlayerId], 'in-period')
+      cost += scoreOutfieldPosition(snapshot, outgoingAssignment.position, 'in-period')
+    }
+
+    if (cost < bestCost) {
+      bestCost = cost
+      bestIncomingOrder = [...permutation]
+    }
+  })
+
+  const nextLineup: Lineup = Object.fromEntries(
+    previousAssignments
+      .filter((entry) => selectedSet.has(entry.playerId))
+      .map((entry) => [entry.position, entry.playerId]),
+  )
+  const substitutions = outgoingAssignments.map((outgoingAssignment, index) => {
+    const playerInId = bestIncomingOrder[index]
+    nextLineup[outgoingAssignment.position] = playerInId
+
+    return {
+      playerInId,
+      playerOutId: outgoingAssignment.playerId,
+      position: outgoingAssignment.position,
+    }
+  })
+
+  return {
+    lineup: nextLineup,
+    substitutions,
+  }
+}
+
+function buildRotationSnapshot(history: PlayerHistory, phase: RotationPhase): RotationSnapshot {
+  if (phase === 'period-start') {
+    return {
+      lastOutfieldPosition: history.lastStartPosition,
+      lastOutfieldGroup: history.lastStartGroup,
+      groupCounts: history.startGroupCounts,
+      positionCounts: history.startPositionCounts,
+      groupsPlayed: [...history.startGroupsPlayed],
+      positionsPlayed: [...history.startPositionsPlayed],
+    }
+  }
+
+  return {
+    lastOutfieldPosition: history.lastOutfieldPosition,
+    lastOutfieldGroup: history.lastOutfieldGroup,
+    groupCounts: history.groupCounts,
+    positionCounts: history.positionCounts,
+    groupsPlayed: [...history.groupsPlayed],
+    positionsPlayed: [...history.positionsPlayed],
+  }
+}
+
+function updatePeriodStartHistory(
+  playerIds: string[],
+  goalkeeperId: string,
+  activeSet: Set<string>,
+  positions: readonly OutfieldPosition[],
+  assignment: Lineup,
+  histories: Record<string, PlayerHistory>,
+) {
+  const starterIds = new Set(positions.map((position) => getLineupPlayer(assignment, position)))
+
+  for (const playerId of playerIds) {
+    const history = histories[playerId]
+
+    if (playerId === goalkeeperId) {
+      history.startedPreviousPeriod = false
+      history.benchedPreviousPeriod = false
+      continue
+    }
+
+    if (activeSet.has(playerId)) {
+      if (history.startedPreviousPeriod) {
+        history.repeatedStartPeriods += 1
+      }
+      history.periodStarts += 1
+      history.startedPreviousPeriod = true
+      history.benchedPreviousPeriod = false
+      continue
+    }
+
+    if (history.benchedPreviousPeriod) {
+      history.repeatedBenchStartPeriods += 1
+    }
+    history.periodBenchStarts += 1
+    history.startedPreviousPeriod = false
+    history.benchedPreviousPeriod = true
+  }
+
+  for (const position of positions) {
+    const playerId = getLineupPlayer(assignment, position)
+    if (!starterIds.has(playerId)) {
+      continue
+    }
+
+    const history = histories[playerId]
+    const group = getRoleGroup(position)
+
+    if (history.lastStartPosition === position) {
+      history.sameStartPositionRepeats += 1
+    }
+    if (history.lastStartGroup === group) {
+      history.sameStartGroupRepeats += 1
+    }
+
+    history.lastStartPosition = position
+    history.lastStartGroup = group
+    history.startPositionCounts[position] += 1
+    history.startGroupCounts[group] += 1
+    history.startPositionsPlayed.add(position)
+    history.startGroupsPlayed.add(group)
+  }
+}
+
+function scoreCandidate(
+  targets: Record<string, number>,
+  histories: Record<string, PlayerHistory>,
+  periods: PeriodPlan[],
+) {
+  const targetPenalty = Object.entries(targets).reduce(
+    (total, [playerId, target]) => total + Math.abs(histories[playerId].actualMinutes - target),
+    0,
+  )
+  const minuteCounts = Object.values(histories).map((history) => history.actualMinutes)
+  const benchCounts = Object.values(histories).map((history) => history.benchMinutes)
+  const minuteSpreadPenalty = (Math.max(...minuteCounts) - Math.min(...minuteCounts)) * 8
+  const benchSpreadPenalty = (Math.max(...benchCounts) - Math.min(...benchCounts)) * 8
+  const repeatPenalty = Object.values(histories).reduce(
+    (total, history) => total + history.samePositionRepeats * 1.5 + history.sameGroupRepeats * 8,
+    0,
+  )
+  const periodStartPenalty = Object.values(histories).reduce((total, history) => {
+    return (
+      total +
+      history.repeatedStartPeriods * 30 +
+      history.repeatedBenchStartPeriods * 34 +
+      history.sameStartGroupRepeats * 24 +
+      history.sameStartPositionRepeats * 4
+    )
+  }, 0)
+  const consecutiveBenchPenalty = Object.values(histories).reduce((total, history) => {
+    return (
+      total +
+      history.consecutiveBenchViolations * 900 +
+      history.benchViolationWeight * 220 +
+      Math.max(history.maxBenchStreak - 1, 0) * 350
+    )
+  }, 0)
+  const groupBreadthPenalty = Object.values(histories).reduce((total, history) => {
+    if (history.outfieldMinutes <= 10) {
+      return total
+    }
+
+    if (history.groupsPlayed.size === 1) {
+      return total + 28
+    }
+
+    if (history.outfieldMinutes >= 20 && history.groupsPlayed.size === 2) {
+      return total + 8
+    }
+
+    return total
+  }, 0)
+  const periodStartVariationPenalty = scorePeriodStartVariation(periods)
+
+  return (
+    targetPenalty * 20 +
+    minuteSpreadPenalty +
+    benchSpreadPenalty +
+    repeatPenalty +
+    periodStartPenalty +
+    consecutiveBenchPenalty +
+    groupBreadthPenalty +
+    periodStartVariationPenalty
+  )
+}
+
+function scorePeriodStartVariation(periods: PeriodPlan[]) {
+  let penalty = 0
+
+  for (let index = 1; index < periods.length; index += 1) {
+    const previousStarters = new Set(Object.values(periods[index - 1].startingLineup))
+    const currentStarters = new Set(Object.values(periods[index].startingLineup))
+    const previousBench = new Set(periods[index - 1].chunks[0]?.substitutes ?? [])
+    const currentBench = new Set(periods[index].chunks[0]?.substitutes ?? [])
+
+    penalty += countIntersection(previousStarters, currentStarters) * 18
+    penalty += countIntersection(previousBench, currentBench) * 22
+  }
+
+  return penalty
+}
+
+function countIntersection<T>(left: Set<T>, right: Set<T>) {
+  let count = 0
+
+  for (const value of left) {
+    if (right.has(value)) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
+function distributeTargetMinutes(
+  playerIds: string[],
+  totalMinutes: number,
+  rng: () => number,
+): Record<string, number> {
+  const baseMinutes = Math.floor(totalMinutes / playerIds.length)
+  const remainder = totalMinutes % playerIds.length
+  const bonusOrder = shuffle([...playerIds], rng)
+  const targets = Object.fromEntries(playerIds.map((playerId) => [playerId, baseMinutes])) as Record<
+    string,
+    number
+  >
+
+  for (let index = 0; index < remainder; index += 1) {
+    targets[bonusOrder[index]] += 1
+  }
+
+  return targets
+}
+
+function getLineupPlayer(lineup: Lineup, position: OutfieldPosition) {
+  const playerId = lineup[position]
+  if (!playerId) {
+    throw new Error(`Saknar spelare för position ${position}.`)
+  }
+  return playerId
+}
+
+function createRng(seed: number) {
+  let state = seed >>> 0
+  return () => {
+    state += 0x6d2b79f5
+    let value = Math.imul(state ^ (state >>> 15), 1 | state)
+    value ^= value + Math.imul(value ^ (value >>> 7), 61 | value)
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function shuffle<T>(items: T[], rng: () => number) {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1))
+    ;[items[index], items[swapIndex]] = [items[swapIndex], items[index]]
+  }
+
+  return items
+}
+
+function forEachPermutation<T>(items: T[], callback: (permutation: T[]) => void) {
+  const values = [...items]
+
+  const visit = (startIndex: number) => {
+    if (startIndex === values.length - 1) {
+      callback([...values])
+      return
+    }
+
+    for (let index = startIndex; index < values.length; index += 1) {
+      ;[values[startIndex], values[index]] = [values[index], values[startIndex]]
+      visit(startIndex + 1)
+      ;[values[startIndex], values[index]] = [values[index], values[startIndex]]
+    }
+  }
+
+  visit(0)
+}
