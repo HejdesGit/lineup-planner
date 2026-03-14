@@ -30,7 +30,8 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: /lås henry på vm/i }))
 
-    expect(screen.getByRole('button', { name: /lås upp henry på vm/i })).toBeInTheDocument()
-    expect(screen.getByText(/positionen ligger fast/i)).toBeInTheDocument()
+    const lockedButton = screen.getByRole('button', { name: /lås upp henry på vm/i })
+    expect(lockedButton).toBeInTheDocument()
+    expect(lockedButton).toHaveTextContent(/låst/i)
   })
 })

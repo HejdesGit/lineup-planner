@@ -29,6 +29,7 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
+import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import { generateMatchPlan } from './lib/scheduler'
 import {
   FORMATION_PRESETS,
@@ -878,7 +879,13 @@ function FormationBoard({
                       player={readLineupPlayer(lineup, position, nameById)}
                       tone={getPositionTone(position)}
                       locked={lockedSlots.includes(position)}
-                      isActive={activeSlot === position || overSlot === position}
+                      dragState={
+                        activeSlot === position
+                          ? 'source'
+                          : overSlot === position
+                            ? 'target'
+                            : 'idle'
+                      }
                       onToggleLock={onToggleLock}
                       onHoverSlot={
                         activeSlot
@@ -900,7 +907,13 @@ function FormationBoard({
                   player={nameById[goalkeeperId] ?? '-'}
                   tone="gk"
                   locked={lockedSlots.includes(GOALKEEPER_SLOT)}
-                  isActive={activeSlot === GOALKEEPER_SLOT || overSlot === GOALKEEPER_SLOT}
+                  dragState={
+                    activeSlot === GOALKEEPER_SLOT
+                      ? 'source'
+                      : overSlot === GOALKEEPER_SLOT
+                        ? 'target'
+                        : 'idle'
+                  }
                   onToggleLock={onToggleLock}
                   onHoverSlot={
                     activeSlot
@@ -917,14 +930,14 @@ function FormationBoard({
           </div>
         </div>
       </SortableContext>
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
         {activeSlot && activePlayer && activeTone ? (
           <PositionBadgeCard
             label={activeSlot}
             player={activePlayer}
             tone={activeTone}
             locked={lockedSlots.includes(activeSlot)}
-            isActive
+            dragState="idle"
             isOverlay
             onToggleLock={undefined}
           />
@@ -1008,7 +1021,7 @@ function PositionBadge({
   player,
   tone,
   locked,
-  isActive,
+  dragState,
   onToggleLock,
   onHoverSlot,
 }: {
@@ -1017,7 +1030,7 @@ function PositionBadge({
   player: string
   tone: 'def' | 'mid' | 'att' | 'gk'
   locked: boolean
-  isActive: boolean
+  dragState: 'idle' | 'source' | 'target'
   onToggleLock: (slotId: BoardSlotId) => void
   onHoverSlot?: (slotId: BoardSlotId) => void
 }) {
@@ -1047,7 +1060,7 @@ function PositionBadge({
         player={player}
         tone={tone}
         locked={locked}
-        isActive={isDragging || isActive}
+        dragState={isDragging ? 'source' : dragState}
         onToggleLock={onToggleLock ? () => onToggleLock(slotId) : undefined}
         dragHandleProps={locked ? undefined : { ...attributes, ...listeners }}
       />
@@ -1060,7 +1073,7 @@ function PositionBadgeCard({
   player,
   tone,
   locked,
-  isActive,
+  dragState,
   isOverlay = false,
   onToggleLock,
   dragHandleProps,
@@ -1069,7 +1082,7 @@ function PositionBadgeCard({
   player: string
   tone: 'def' | 'mid' | 'att' | 'gk'
   locked: boolean
-  isActive: boolean
+  dragState: 'idle' | 'source' | 'target'
   isOverlay?: boolean
   onToggleLock?: () => void
   dragHandleProps?: HTMLAttributes<HTMLDivElement>
@@ -1085,15 +1098,20 @@ function PositionBadgeCard({
     <div
       className={`group relative min-w-[5.4rem] touch-manipulation select-none rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]} ${
         locked ? 'ring-2 ring-clay-200/40 shadow-[0_0_0_2px_rgba(251,191,36,0.16)]' : ''
-      } ${isActive ? 'scale-[1.02] shadow-2xl' : ''} ${isOverlay ? 'opacity-95' : ''}`}
+      } ${
+        isOverlay
+          ? 'scale-[1.02] shadow-2xl opacity-95'
+          : dragState === 'source'
+            ? 'opacity-0'
+            : dragState === 'target'
+              ? 'ring-1 ring-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+              : ''
+      }`}
       {...dragHandleProps}
     >
       {locked ? (
         <>
           <div className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[repeating-linear-gradient(-45deg,rgba(251,191,36,0.14),rgba(251,191,36,0.14)_7px,transparent_7px,transparent_15px)] opacity-70" />
-          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-full border border-clay-200/40 bg-black/35 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-clay-50">
-            Låst
-          </div>
         </>
       ) : null}
       {onToggleLock ? (
@@ -1119,11 +1137,6 @@ function PositionBadgeCard({
       <div className="pointer-events-none relative z-[1]">
         <p className="font-mono text-[10px] uppercase tracking-[0.28em] opacity-75">{label}</p>
         <p className="mt-1 text-xs font-semibold sm:text-sm">{player}</p>
-        {locked ? (
-          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.22em] text-clay-100/85">
-            Positionen ligger fast
-          </p>
-        ) : null}
       </div>
     </div>
   )
