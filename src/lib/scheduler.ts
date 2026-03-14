@@ -80,12 +80,76 @@ interface CandidatePlan {
   goalkeepers: string[]
 }
 
+export type ScoringProfileName = 'legacy' | 'normalized'
+
+export interface ScoreComponents {
+  playerCount: number
+  targetPenalty: number
+  minuteSpreadPenalty: number
+  benchSpreadPenalty: number
+  repeatPenalty: number
+  periodStartPenalty: number
+  consecutiveBenchPenalty: number
+  fragmentedMinutesPenalty: number
+  groupBreadthPenalty: number
+  periodStartVariationPenalty: number
+}
+
+interface ScoringProfile {
+  name: ScoringProfileName
+  weights: Omit<ScoreComponents, 'playerCount'>
+  normalizeComponents: ReadonlySet<keyof Omit<ScoreComponents, 'playerCount'>>
+}
+
 interface AssignmentResult {
   lineup: Lineup
   substitutions: ChunkSubstitution[]
 }
 
 const DEFAULT_ATTEMPTS = 72
+const AGGREGATE_SCORING_COMPONENTS = new Set<keyof Omit<ScoreComponents, 'playerCount'>>([
+  'targetPenalty',
+  'repeatPenalty',
+  'periodStartPenalty',
+  'consecutiveBenchPenalty',
+  'fragmentedMinutesPenalty',
+  'groupBreadthPenalty',
+])
+
+const LEGACY_SCORING_PROFILE: ScoringProfile = {
+  name: 'legacy',
+  weights: {
+    targetPenalty: 20,
+    minuteSpreadPenalty: 8,
+    benchSpreadPenalty: 8,
+    repeatPenalty: 1,
+    periodStartPenalty: 1,
+    consecutiveBenchPenalty: 1,
+    fragmentedMinutesPenalty: 1,
+    groupBreadthPenalty: 1,
+    periodStartVariationPenalty: 1,
+  },
+  normalizeComponents: new Set(),
+}
+
+const NORMALIZED_SCORING_PROFILE: ScoringProfile = {
+  name: 'normalized',
+  weights: {
+    targetPenalty: 180,
+    minuteSpreadPenalty: 8,
+    benchSpreadPenalty: 8,
+    repeatPenalty: 12,
+    periodStartPenalty: 10,
+    consecutiveBenchPenalty: 12,
+    fragmentedMinutesPenalty: 11,
+    groupBreadthPenalty: 11,
+    periodStartVariationPenalty: 1,
+  },
+  normalizeComponents: AGGREGATE_SCORING_COMPONENTS,
+}
+
+// Revert to the legacy profile if the regression calibration stops holding.
+const ACTIVE_SCORING_PROFILE = NORMALIZED_SCORING_PROFILE
 
 function getRoleGroup(position: OutfieldPosition): RoleGroup {
   return ROLE_GROUPS[position]
@@ -186,14 +250,15 @@ export function generateMatchPlan({
   chunkMinutes,
   lockedGoalkeeperIds,
   seed = Date.now(),
-  attempts = DEFAULT_ATTEMPTS,
+  attempts,
 }: MatchConfig): MatchPlan {
   validateConfig(players, periodMinutes, formation, chunkMinutes, lockedGoalkeeperIds)
+  const resolvedAttempts = resolveAttemptCount({ players, periodMinutes, chunkMinutes, attempts })
 
   let best: CandidatePlan | null = null
   let bestSeed = seed
 
-  for (let index = 0; index < attempts; index += 1) {
+  for (let index = 0; index < resolvedAttempts; index += 1) {
     const candidateSeed = (seed + index * 7919) >>> 0
     const candidate = buildCandidatePlan(
       players,
@@ -453,8 +518,10 @@ function buildCandidatePlan(
     }
   })
 
+  const scoreComponents = buildScoreComponents(targets, histories, periods, players.length)
+
   return {
-    score: scoreCandidate(targets, histories, periods),
+    score: scoreComponentsToTotal(scoreComponents, ACTIVE_SCORING_PROFILE.name).totalScore,
     periods,
     summaries,
     targets,
@@ -491,6 +558,28 @@ function resolveGoalkeepers(
   }
 
   return chosen as string[]
+}
+
+export function resolveAttemptCount({
+  players,
+  periodMinutes,
+  chunkMinutes,
+  attempts,
+}: {
+  players: Player[]
+  periodMinutes: 15 | 20
+  chunkMinutes: number
+  attempts?: number
+}) {
+  if (typeof attempts === 'number') {
+    return attempts
+  }
+
+  return Math.max(DEFAULT_ATTEMPTS, players.length * getTotalChunkCount(periodMinutes, chunkMinutes) * 2)
+}
+
+function getTotalChunkCount(periodMinutes: 15 | 20, chunkMinutes: number) {
+  return PERIOD_COUNT * Math.ceil(periodMinutes / chunkMinutes)
 }
 
 function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchChunk[] {
@@ -946,10 +1035,11 @@ function updatePeriodStartHistory(
   }
 }
 
-function scoreCandidate(
+function buildScoreComponents(
   targets: Record<string, number>,
   histories: Record<string, PlayerHistory>,
   periods: PeriodPlan[],
+  playerCount: number,
 ) {
   const targetPenalty = Object.entries(targets).reduce(
     (total, [playerId, target]) => total + Math.abs(histories[playerId].actualMinutes - target),
@@ -957,8 +1047,8 @@ function scoreCandidate(
   )
   const minuteCounts = Object.values(histories).map((history) => history.actualMinutes)
   const benchCounts = Object.values(histories).map((history) => history.benchMinutes)
-  const minuteSpreadPenalty = (Math.max(...minuteCounts) - Math.min(...minuteCounts)) * 8
-  const benchSpreadPenalty = (Math.max(...benchCounts) - Math.min(...benchCounts)) * 8
+  const minuteSpreadPenalty = Math.max(...minuteCounts) - Math.min(...minuteCounts)
+  const benchSpreadPenalty = Math.max(...benchCounts) - Math.min(...benchCounts)
   const repeatPenalty = Object.values(histories).reduce(
     (total, history) => total + history.samePositionRepeats * 1.5 + history.sameGroupRepeats * 8,
     0,
@@ -1004,17 +1094,114 @@ function scoreCandidate(
   }, 0)
   const periodStartVariationPenalty = scorePeriodStartVariation(periods)
 
-  return (
-    targetPenalty * 20 +
-    minuteSpreadPenalty +
-    benchSpreadPenalty +
-    repeatPenalty +
-    periodStartPenalty +
-    consecutiveBenchPenalty +
-    fragmentedMinutesPenalty +
-    groupBreadthPenalty +
-    periodStartVariationPenalty
-  )
+  return {
+    playerCount,
+    targetPenalty,
+    minuteSpreadPenalty,
+    benchSpreadPenalty,
+    repeatPenalty,
+    periodStartPenalty,
+    consecutiveBenchPenalty,
+    fragmentedMinutesPenalty,
+    groupBreadthPenalty,
+    periodStartVariationPenalty,
+  } satisfies ScoreComponents
+}
+
+export function scoreComponentsToTotal(
+  components: ScoreComponents,
+  profileName: ScoringProfileName = ACTIVE_SCORING_PROFILE.name,
+) {
+  const profile = getScoringProfile(profileName)
+  const playerCount = Math.max(components.playerCount, 1)
+  const componentScores = {
+    targetPenalty: scoreComponent(
+      components.targetPenalty,
+      playerCount,
+      'targetPenalty',
+      profile,
+    ),
+    minuteSpreadPenalty: scoreComponent(
+      components.minuteSpreadPenalty,
+      playerCount,
+      'minuteSpreadPenalty',
+      profile,
+    ),
+    benchSpreadPenalty: scoreComponent(
+      components.benchSpreadPenalty,
+      playerCount,
+      'benchSpreadPenalty',
+      profile,
+    ),
+    repeatPenalty: scoreComponent(
+      components.repeatPenalty,
+      playerCount,
+      'repeatPenalty',
+      profile,
+    ),
+    periodStartPenalty: scoreComponent(
+      components.periodStartPenalty,
+      playerCount,
+      'periodStartPenalty',
+      profile,
+    ),
+    consecutiveBenchPenalty: scoreComponent(
+      components.consecutiveBenchPenalty,
+      playerCount,
+      'consecutiveBenchPenalty',
+      profile,
+    ),
+    fragmentedMinutesPenalty: scoreComponent(
+      components.fragmentedMinutesPenalty,
+      playerCount,
+      'fragmentedMinutesPenalty',
+      profile,
+    ),
+    groupBreadthPenalty: scoreComponent(
+      components.groupBreadthPenalty,
+      playerCount,
+      'groupBreadthPenalty',
+      profile,
+    ),
+    periodStartVariationPenalty: scoreComponent(
+      components.periodStartVariationPenalty,
+      playerCount,
+      'periodStartVariationPenalty',
+      profile,
+    ),
+  }
+
+  return {
+    profile: profile.name,
+    components,
+    componentScores,
+    totalScore: Object.values(componentScores).reduce((total, value) => total + value, 0),
+  }
+}
+
+export function getPlanScoreBreakdown(
+  plan: Pick<MatchPlan, 'periods' | 'summaries' | 'targets'>,
+  profileName: ScoringProfileName = ACTIVE_SCORING_PROFILE.name,
+) {
+  const histories = createHistoriesFromPlan(plan)
+  const components = buildScoreComponents(plan.targets, histories, plan.periods, plan.summaries.length)
+
+  return scoreComponentsToTotal(components, profileName)
+}
+
+function getScoringProfile(profileName: ScoringProfileName) {
+  return profileName === 'legacy' ? LEGACY_SCORING_PROFILE : NORMALIZED_SCORING_PROFILE
+}
+
+function scoreComponent(
+  value: number,
+  playerCount: number,
+  component: keyof Omit<ScoreComponents, 'playerCount'>,
+  profile: ScoringProfile,
+) {
+  const normalizedValue = profile.normalizeComponents.has(component) ? value / playerCount : value
+
+  return normalizedValue * profile.weights[component]
 }
 
 function scorePeriodStartVariation(periods: PeriodPlan[]) {
@@ -1043,6 +1230,173 @@ function countIntersection<T>(left: Set<T>, right: Set<T>) {
   }
 
   return count
+}
+
+function createHistoriesFromPlan(
+  plan: Pick<MatchPlan, 'periods' | 'summaries'>,
+): Record<string, PlayerHistory> {
+  const playerIds = plan.summaries.map((summary) => summary.playerId)
+  const histories = Object.fromEntries(
+    playerIds.map((playerId) => [
+      playerId,
+      {
+        actualMinutes: 0,
+        outfieldMinutes: 0,
+        benchMinutes: 0,
+        playStreak: 0,
+        benchStreak: 0,
+        lastChunkState: null,
+        stateTransitions: 0,
+        shortPlayBlocks: 0,
+        consecutiveBenchViolations: 0,
+        benchViolationWeight: 0,
+        maxBenchStreak: 0,
+        goalkeeperPeriods: [],
+        lastOutfieldPosition: null,
+        lastOutfieldGroup: null,
+        groupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        positionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        groupsPlayed: new Set<RoleGroup>(),
+        positionsPlayed: new Set<OutfieldPosition>(),
+        samePositionRepeats: 0,
+        sameGroupRepeats: 0,
+        periodStarts: 0,
+        periodBenchStarts: 0,
+        startedPreviousPeriod: false,
+        benchedPreviousPeriod: false,
+        lastStartPosition: null,
+        lastStartGroup: null,
+        startGroupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        startPositionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        startGroupsPlayed: new Set<RoleGroup>(),
+        startPositionsPlayed: new Set<OutfieldPosition>(),
+        sameStartPositionRepeats: 0,
+        sameStartGroupRepeats: 0,
+        repeatedStartPeriods: 0,
+        repeatedBenchStartPeriods: 0,
+      } satisfies PlayerHistory,
+    ]),
+  ) as Record<string, PlayerHistory>
+
+  for (const period of plan.periods) {
+    const firstChunk = period.chunks[0]
+    const starterIds = new Set(
+      firstChunk ? period.positions.map((position) => getLineupPlayer(firstChunk.lineup, position)) : [],
+    )
+
+    for (const playerId of playerIds) {
+      const history = histories[playerId]
+
+      if (playerId === period.goalkeeperId) {
+        history.startedPreviousPeriod = false
+        history.benchedPreviousPeriod = false
+        continue
+      }
+
+      if (starterIds.has(playerId)) {
+        if (history.startedPreviousPeriod) {
+          history.repeatedStartPeriods += 1
+        }
+        history.periodStarts += 1
+        history.startedPreviousPeriod = true
+        history.benchedPreviousPeriod = false
+        continue
+      }
+
+      if (history.benchedPreviousPeriod) {
+        history.repeatedBenchStartPeriods += 1
+      }
+      history.periodBenchStarts += 1
+      history.startedPreviousPeriod = false
+      history.benchedPreviousPeriod = true
+    }
+
+    if (firstChunk) {
+      for (const position of period.positions) {
+        const playerId = getLineupPlayer(firstChunk.lineup, position)
+        const history = histories[playerId]
+        const group = getRoleGroup(position)
+
+        if (history.lastStartPosition === position) {
+          history.sameStartPositionRepeats += 1
+        }
+        if (history.lastStartGroup === group) {
+          history.sameStartGroupRepeats += 1
+        }
+
+        history.lastStartPosition = position
+        history.lastStartGroup = group
+        history.startPositionCounts[position] += 1
+        history.startGroupCounts[group] += 1
+        history.startPositionsPlayed.add(position)
+        history.startGroupsPlayed.add(group)
+      }
+    }
+
+    for (const chunk of period.chunks) {
+      const activePlayerIds = new Set(chunk.activePlayerIds)
+
+      for (const playerId of playerIds) {
+        const history = histories[playerId]
+        const isActive = activePlayerIds.has(playerId)
+        const nextState = isActive ? 'active' : 'bench'
+
+        if (history.lastChunkState && history.lastChunkState !== nextState) {
+          history.stateTransitions += 1
+        }
+
+        if (isActive) {
+          history.actualMinutes += chunk.durationMinutes
+          history.playStreak += 1
+          history.benchStreak = 0
+        } else {
+          if (history.playStreak === 1) {
+            history.shortPlayBlocks += 1
+          }
+          const nextBenchStreak = history.benchStreak + 1
+          if (history.benchStreak > 0) {
+            history.consecutiveBenchViolations += 1
+            history.benchViolationWeight += nextBenchStreak
+          }
+          history.benchMinutes += chunk.durationMinutes
+          history.playStreak = 0
+          history.benchStreak = nextBenchStreak
+          history.maxBenchStreak = Math.max(history.maxBenchStreak, nextBenchStreak)
+        }
+
+        history.lastChunkState = nextState
+      }
+
+      for (const position of period.positions) {
+        const playerId = getLineupPlayer(chunk.lineup, position)
+        const history = histories[playerId]
+        const group = getRoleGroup(position)
+
+        if (history.lastOutfieldPosition === position) {
+          history.samePositionRepeats += 1
+        }
+        if (history.lastOutfieldGroup === group) {
+          history.sameGroupRepeats += 1
+        }
+
+        history.outfieldMinutes += chunk.durationMinutes
+        history.lastOutfieldPosition = position
+        history.lastOutfieldGroup = group
+        history.positionCounts[position] += chunk.durationMinutes
+        history.groupCounts[group] += chunk.durationMinutes
+        history.positionsPlayed.add(position)
+        history.groupsPlayed.add(group)
+      }
+    }
+  }
+
+  for (const history of Object.values(histories)) {
+    if (history.playStreak === 1) {
+      history.shortPlayBlocks += 1
+    }
+  }
+
+  return histories
 }
 
 function distributeTargetMinutes(

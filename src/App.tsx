@@ -176,7 +176,8 @@ function App() {
   const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
   const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
 
-  const playerOptions = useMemo(() => getPlayerOptions(formState.playerInput), [formState.playerInput])
+  const rosterNames = useMemo(() => getRosterNames(formState.playerInput), [formState.playerInput])
+  const playerOptions = rosterNames
   const normalizedOverrides = useMemo(
     () => (plan ? normalizePeriodOverrides(plan, periodOverrides) : {}),
     [periodOverrides, plan],
@@ -265,6 +266,7 @@ function App() {
             state={formState}
             dispatch={dispatch}
             playerOptions={playerOptions}
+            rosterCount={rosterNames.length}
             isPending={isPending}
             canShare={Boolean(plan)}
             onGenerate={handleGenerate}
@@ -343,6 +345,7 @@ function SettingsPanel({
   state,
   dispatch,
   playerOptions,
+  rosterCount,
   isPending,
   canShare,
   onGenerate,
@@ -351,11 +354,14 @@ function SettingsPanel({
   state: FormState
   dispatch: Dispatch<FormAction>
   playerOptions: string[]
+  rosterCount: number
   isPending: boolean
   canShare: boolean
   onGenerate: () => void
   onShareViaWhatsApp: () => void
 }) {
+  const showChunkRecommendation = rosterCount >= 10 && state.chunkMinutes >= 10
+
   return (
     <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-center sm:justify-between">
@@ -465,6 +471,17 @@ function SettingsPanel({
               ))}
             </SelectControl>
           </Field>
+          {showChunkRecommendation ? (
+            <div className="rounded-[1.25rem] border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+              <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-100/80">
+                Rekommendation
+              </p>
+              <p className="mt-1">
+                Med {rosterCount} spelare och {state.chunkMinutes}-minutersfönster kan väntan bli
+                lång. Prova gärna 5 till 7 minuter om du vill korta bänkpassen.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
@@ -579,6 +596,7 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {plan.summaries.map((summary) => {
           const playerDetail = buildPlayerDetail(plan, summary.playerId, playerNameById)
+          const minuteBreakdown = getMinuteBreakdown(summary, plan.periodMinutes)
 
           return (
             <details
@@ -597,8 +615,8 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="rounded-2xl bg-clay-400 px-3 py-2 text-right text-clay-900">
-                      <p className="font-display text-2xl font-black">{summary.totalMinutes}</p>
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em]">min</p>
+                      <p className="font-display text-2xl font-black">{minuteBreakdown.totalMinutes}</p>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.22em]">totalt</p>
                     </div>
                     <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
                       Visa detaljer
@@ -606,7 +624,23 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                   </div>
                 </div>
 
-                <dl className="mt-4 grid grid-cols-2 gap-3 text-sm text-stone-300">
+                <dl className="mt-4 grid gap-3 text-sm text-stone-300 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl border border-amber-300/20 bg-amber-400/10 p-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-100/80">
+                      MV
+                    </dt>
+                    <dd className="mt-1 text-lg font-semibold text-white">
+                      {minuteBreakdown.goalkeeperMinutes} min
+                    </dd>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-100/80">
+                      Utespelare
+                    </dt>
+                    <dd className="mt-1 text-lg font-semibold text-white">
+                      {minuteBreakdown.outfieldMinutes} min
+                    </dd>
+                  </div>
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
                     <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
                       Bänktid
@@ -622,6 +656,11 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                     </dd>
                   </div>
                 </dl>
+
+                <p className="mt-4 text-sm text-stone-300">
+                  MV: {minuteBreakdown.goalkeeperMinutes} min + Utespelare:{' '}
+                  {minuteBreakdown.outfieldMinutes} min = {minuteBreakdown.totalMinutes} min totalt
+                </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   {summary.goalkeeperPeriods.length > 0 || summary.roleGroups.length > 0 ? (
@@ -649,8 +688,10 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
               </summary>
 
               <div className="mt-5 border-t border-white/10 pt-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <DetailStat label="Totaltid" value={`${summary.totalMinutes} min`} />
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <DetailStat label="MV-tid" value={`${minuteBreakdown.goalkeeperMinutes} min`} />
+                  <DetailStat label="Utespelartid" value={`${minuteBreakdown.outfieldMinutes} min`} />
+                  <DetailStat label="Totaltid" value={`${minuteBreakdown.totalMinutes} min`} />
                   <DetailStat label="Bänktid" value={`${summary.benchMinutes} min`} />
                   <DetailStat
                     label="Startroller"
@@ -670,7 +711,8 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                             Period {periodDetail.period}
                           </p>
                           <p className="mt-1 text-sm font-semibold text-white">
-                            {periodDetail.minutes} min spel · {periodDetail.benchMinutes} min bänk
+                            {periodDetail.totalMinutes} min totalt · {periodDetail.goalkeeperMinutes} min MV ·{' '}
+                            {periodDetail.outfieldMinutes} min utespelare
                           </p>
                         </div>
                         <div className="text-sm text-stone-300">
@@ -1397,6 +1439,8 @@ function buildPlayerDetail(
           rangeLabel: `${chunk.startMinute}-${chunk.endMinute} min`,
           statusLabel: isGoalkeeper ? 'Målvakt' : position ? position : 'Bänk',
           isActive,
+          isGoalkeeper,
+          isOutfield: !isGoalkeeper && Boolean(position),
           swapLabel: incomingSubstitution
             ? `${nameById[incomingSubstitution.playerInId]} in för ${nameById[incomingSubstitution.playerOutId]} (${incomingSubstitution.position})`
             : outgoingSubstitution
@@ -1408,8 +1452,14 @@ function buildPlayerDetail(
 
       return {
         period: period.period,
-        minutes: windows
+        totalMinutes: windows
           .filter((windowDetail) => windowDetail.isActive)
+          .reduce((total, windowDetail) => total + windowDetail.durationMinutes, 0),
+        goalkeeperMinutes: windows
+          .filter((windowDetail) => windowDetail.isGoalkeeper)
+          .reduce((total, windowDetail) => total + windowDetail.durationMinutes, 0),
+        outfieldMinutes: windows
+          .filter((windowDetail) => windowDetail.isOutfield)
           .reduce((total, windowDetail) => total + windowDetail.durationMinutes, 0),
         benchMinutes: windows
           .filter((windowDetail) => !windowDetail.isActive)
@@ -1636,8 +1686,29 @@ function normalizePlayers(input: string): Player[] {
   }))
 }
 
-function getPlayerOptions(input: string) {
-  return Array.from(new Set(parseNames(input)))
+function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinutes: number) {
+  const goalkeeperMinutes = summary.goalkeeperPeriods.length * periodMinutes
+  const outfieldMinutes = Math.max(summary.totalMinutes - goalkeeperMinutes, 0)
+
+  return {
+    goalkeeperMinutes,
+    outfieldMinutes,
+    totalMinutes: summary.totalMinutes,
+  }
+}
+
+function getRosterNames(input: string) {
+  const rosterByNormalizedName = new Map<string, string>()
+
+  for (const name of parseNames(input)) {
+    const normalizedName = name.toLocaleLowerCase('sv-SE')
+
+    if (!rosterByNormalizedName.has(normalizedName)) {
+      rosterByNormalizedName.set(normalizedName, name)
+    }
+  }
+
+  return [...rosterByNormalizedName.values()]
 }
 
 function parseNames(input: string) {

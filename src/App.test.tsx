@@ -42,6 +42,7 @@ function buildSharedLineupFixture() {
   const swappedAssignments = swapBoardAssignments(createBoardAssignments(plan.periods[0]), 'VB', 'CB')
 
   return {
+    plan,
     shareToken: encodeLineupSnapshot({
       config,
       overrides: {
@@ -108,6 +109,24 @@ describe('App', () => {
     expect(screen.getByText(/speltid per spelare/i)).toBeInTheDocument()
   })
 
+  it('shows a chunk recommendation for bigger rosters with long windows', () => {
+    render(<App />)
+
+    expect(screen.getByText(/rekommendation/i)).toBeInTheDocument()
+    expect(screen.getByText(/kan väntan bli lång/i)).toBeInTheDocument()
+  })
+
+  it('hides the chunk recommendation for shorter windows in smaller rosters', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.clear(screen.getByLabelText(/spelare/i))
+    await user.type(screen.getByLabelText(/spelare/i), 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo')
+    await user.selectOptions(screen.getByLabelText(/spelfönster/i), '7')
+
+    expect(screen.queryByText(/kan väntan bli lång/i)).not.toBeInTheDocument()
+  })
+
   it('shows a stronger lock state on the formation board', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -168,6 +187,33 @@ describe('App', () => {
         name: new RegExp(`lås ${getPlayerName(swappedAssignments.VB)} på vb`, 'i'),
       }),
     ).toBeInTheDocument()
+  })
+
+  it('shows a goalkeeper and outfield minute split for players with goalkeeper time', async () => {
+    const { shareToken, plan } = buildSharedLineupFixture()
+    const adaSummary = plan.summaries.find((summary) => summary.name === 'Ada')
+
+    if (!adaSummary) {
+      throw new Error('Ada saknas i fixture-planen.')
+    }
+
+    setUrl(`/?lineup=${shareToken}`)
+    render(<App />)
+
+    const expectedSummaryLine = `MV: ${adaSummary.goalkeeperPeriods.length * plan.periodMinutes} min + Utespelare: ${adaSummary.totalMinutes - adaSummary.goalkeeperPeriods.length * plan.periodMinutes} min = ${adaSummary.totalMinutes} min totalt`
+    const adaCard = (await screen.findByRole('heading', { name: 'Ada' })).closest('details')
+
+    if (!adaCard) {
+      throw new Error('Ada-kortet saknas i testet.')
+    }
+
+    expect(within(adaCard).getByText(expectedSummaryLine)).toBeInTheDocument()
+
+    await userEvent.setup().click(within(adaCard).getByRole('heading', { name: 'Ada' }))
+
+    expect(within(adaCard).getByText(/MV-tid/i)).toBeInTheDocument()
+    expect(within(adaCard).getByText(/Utespelartid/i)).toBeInTheDocument()
+    expect(within(adaCard).getByText(/Totaltid/i)).toBeInTheDocument()
   })
 
   it('updates the share url after generating a lineup', async () => {
@@ -237,6 +283,7 @@ describe('App', () => {
     expect(getLineupParam()).toBeNull()
     expect(screen.getByDisplayValue('2-3-1')).toBeInTheDocument()
   })
+
 })
 
 function getPlayerName(playerId: string) {

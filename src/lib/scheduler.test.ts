@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { generateMatchPlan, scoreOutfieldPosition } from './scheduler'
+import {
+  generateMatchPlan,
+  getPlanScoreBreakdown,
+  resolveAttemptCount,
+  scoreComponentsToTotal,
+  scoreOutfieldPosition,
+} from './scheduler'
 import { FORMATION_PRESETS, type ChunkPlan, type FormationKey, type Player } from './types'
 
 function createPlayers(count: number): Player[] {
@@ -442,6 +448,146 @@ describe('generateMatchPlan', () => {
 
     expect(matvii?.totalMinutes).toBeGreaterThanOrEqual(40)
     expect(matvii?.positionsPlayed).toContain('A')
+  })
+
+  it('compares legacy and normalized scores for 8, 10 and 12-player regressions', () => {
+    for (const playerCount of [8, 10, 12]) {
+      const players = createPlayers(playerCount)
+      const plan = generateMatchPlan({
+        players,
+        periodMinutes: 20,
+        formation: '2-3-1',
+        chunkMinutes: 10,
+        lockedGoalkeeperIds: [null, null, null],
+        seed: 1000 + playerCount,
+        attempts: 24,
+      })
+
+      const normalized = getPlanScoreBreakdown(plan, 'normalized')
+      const legacy = getPlanScoreBreakdown(plan, 'legacy')
+
+      expect(plan.score).toBe(normalized.totalScore)
+      expect(legacy.totalScore).not.toBe(normalized.totalScore)
+      expectNoConsecutiveBenchWindows(plan, players)
+    }
+  })
+})
+
+describe('scheduler scoring calibration', () => {
+  it('keeps per-player aggregate scoring closer across 8, 10 and 12 players than legacy scoring', () => {
+    const legacyScores = [8, 10, 12].map((playerCount) =>
+      scoreComponentsToTotal(
+        {
+          playerCount,
+          targetPenalty: playerCount * 6,
+          minuteSpreadPenalty: 10,
+          benchSpreadPenalty: 10,
+          repeatPenalty: playerCount * 14,
+          periodStartPenalty: playerCount * 12,
+          consecutiveBenchPenalty: playerCount * 20,
+          fragmentedMinutesPenalty: playerCount * 10,
+          groupBreadthPenalty: playerCount * 8,
+          periodStartVariationPenalty: 32,
+        },
+        'legacy',
+      ).totalScore,
+    )
+    const normalizedScores = [8, 10, 12].map((playerCount) =>
+      scoreComponentsToTotal(
+        {
+          playerCount,
+          targetPenalty: playerCount * 6,
+          minuteSpreadPenalty: 10,
+          benchSpreadPenalty: 10,
+          repeatPenalty: playerCount * 14,
+          periodStartPenalty: playerCount * 12,
+          consecutiveBenchPenalty: playerCount * 20,
+          fragmentedMinutesPenalty: playerCount * 10,
+          groupBreadthPenalty: playerCount * 8,
+          periodStartVariationPenalty: 32,
+        },
+        'normalized',
+      ).totalScore,
+    )
+
+    expect(Math.max(...normalizedScores) - Math.min(...normalizedScores)).toBeLessThan(
+      Math.max(...legacyScores) - Math.min(...legacyScores),
+    )
+  })
+
+  it('still lets repeat, fragmentation and group breadth penalties influence the winner after normalization', () => {
+    const cleanerRotation = scoreComponentsToTotal(
+      {
+        playerCount: 10,
+        targetPenalty: 12,
+        minuteSpreadPenalty: 10,
+        benchSpreadPenalty: 10,
+        repeatPenalty: 18,
+        periodStartPenalty: 12,
+        consecutiveBenchPenalty: 24,
+        fragmentedMinutesPenalty: 10,
+        groupBreadthPenalty: 6,
+        periodStartVariationPenalty: 28,
+      },
+      'normalized',
+    )
+    const worseRotation = scoreComponentsToTotal(
+      {
+        playerCount: 10,
+        targetPenalty: 12,
+        minuteSpreadPenalty: 10,
+        benchSpreadPenalty: 10,
+        repeatPenalty: 60,
+        periodStartPenalty: 12,
+        consecutiveBenchPenalty: 24,
+        fragmentedMinutesPenalty: 38,
+        groupBreadthPenalty: 24,
+        periodStartVariationPenalty: 28,
+      },
+      'normalized',
+    )
+
+    expect(cleanerRotation.totalScore).toBeLessThan(worseRotation.totalScore)
+    expect(worseRotation.componentScores.repeatPenalty).toBeGreaterThan(
+      cleanerRotation.componentScores.repeatPenalty,
+    )
+    expect(worseRotation.componentScores.fragmentedMinutesPenalty).toBeGreaterThan(
+      cleanerRotation.componentScores.fragmentedMinutesPenalty,
+    )
+    expect(worseRotation.componentScores.groupBreadthPenalty).toBeGreaterThan(
+      cleanerRotation.componentScores.groupBreadthPenalty,
+    )
+  })
+})
+
+describe('resolveAttemptCount', () => {
+  it('keeps the 72-attempt floor for simpler scenarios and scales up for larger searches', () => {
+    expect(
+      resolveAttemptCount({
+        players: createPlayers(6),
+        periodMinutes: 15,
+        chunkMinutes: 10,
+      }),
+    ).toBe(72)
+
+    expect(
+      resolveAttemptCount({
+        players: createPlayers(12),
+        periodMinutes: 20,
+        chunkMinutes: 5,
+      }),
+    ).toBe(288)
+  })
+
+  it('respects an explicit attempts override', () => {
+    expect(
+      resolveAttemptCount({
+        players: createPlayers(12),
+        periodMinutes: 20,
+        chunkMinutes: 5,
+        attempts: 16,
+      }),
+    ).toBe(16)
   })
 })
 
