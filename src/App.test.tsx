@@ -112,9 +112,21 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /lås henry på vm/i }))
+    const lockButton = screen
+      .getAllByRole('button', { name: /^lås /i })
+      .find((button) => !/ på mv$/i.test(button.getAttribute('aria-label') ?? ''))
 
-    const lockedButton = screen.getByRole('button', { name: /lås upp henry på vm/i })
+    expect(lockButton).toBeDefined()
+
+    const unlockedLabel = lockButton!.getAttribute('aria-label')
+
+    expect(unlockedLabel).toBeTruthy()
+
+    await user.click(lockButton!)
+
+    const lockedButton = screen.getByRole('button', {
+      name: new RegExp((unlockedLabel ?? '').replace(/^Lås /i, 'Lås upp '), 'i'),
+    })
     expect(lockedButton).toBeInTheDocument()
     expect(lockedButton.querySelector('svg')).not.toBeNull()
   })

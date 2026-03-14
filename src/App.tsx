@@ -168,13 +168,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 function App() {
-  const initialStateRef = useRef<InitialAppState | null>(null)
-
-  if (!initialStateRef.current) {
-    initialStateRef.current = createInitialAppState()
-  }
-
-  const initialState = initialStateRef.current
+  const [initialState] = useState(createInitialAppState)
   const [formState, dispatch] = useReducer(formReducer, initialState.formState)
   const [isPending, startTransition] = useTransition()
   const [generatedConfig, setGeneratedConfig] = useState(initialState.generatedConfig)

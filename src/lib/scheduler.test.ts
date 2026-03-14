@@ -21,6 +21,46 @@ function getBenchWindows(plan: ReturnType<typeof generateMatchPlan>, players: Pl
   })
 }
 
+function getPlayerChunkStates(plan: ReturnType<typeof generateMatchPlan>, playerId: string) {
+  return plan.periods.flatMap((period) =>
+    period.chunks.map((chunk) => (chunk.activePlayerIds.includes(playerId) ? 'P' : 'B')),
+  )
+}
+
+function getSingleChunkPlayBlocks(states: string[]) {
+  let count = 0
+
+  for (let index = 0; index < states.length; index += 1) {
+    const isIsolatedPlayWindow =
+      states[index] === 'P' &&
+      states[index - 1] !== 'P' &&
+      states[index + 1] !== 'P'
+
+    if (isIsolatedPlayWindow) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
+function getLongestPlayStreak(states: string[]) {
+  let longest = 0
+  let current = 0
+
+  for (const state of states) {
+    if (state === 'P') {
+      current += 1
+      longest = Math.max(longest, current)
+      continue
+    }
+
+    current = 0
+  }
+
+  return longest
+}
+
 function expectNoConsecutiveBenchWindows(
   plan: ReturnType<typeof generateMatchPlan>,
   players: Player[],
@@ -312,6 +352,96 @@ describe('generateMatchPlan', () => {
     }
 
     expect(foundBoundaryReset).toBe(true)
+  })
+
+  it('keeps named outfielders within one window of total minutes in the 11-player scenario', () => {
+    const players: Player[] = [
+      { id: 'p-1', name: 'Adam' },
+      { id: 'p-2', name: 'Emil' },
+      { id: 'p-3', name: 'Leonel' },
+      { id: 'p-4', name: 'LionLionLion' },
+      { id: 'p-5', name: 'Madison' },
+      { id: 'p-6', name: 'Matvii' },
+      { id: 'p-7', name: 'Svante' },
+      { id: 'p-8', name: 'Noel' },
+      { id: 'p-9', name: 'Oscar' },
+      { id: 'p-10', name: 'Vilhelm' },
+      { id: 'p-11', name: 'Ruben' },
+    ]
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 10,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1,
+      attempts: 72,
+    })
+    const totals = Object.fromEntries(plan.summaries.map((summary) => [summary.name, summary.totalMinutes]))
+
+    expect(Math.abs(totals.Leonel - totals.Emil)).toBeLessThanOrEqual(10)
+    expect(Math.abs(totals.Leonel - totals.Madison)).toBeLessThanOrEqual(10)
+  })
+
+  it('avoids giving Leonel only isolated one-window stints in the 11-player scenario', () => {
+    const players: Player[] = [
+      { id: 'p-1', name: 'Adam' },
+      { id: 'p-2', name: 'Emil' },
+      { id: 'p-3', name: 'Leonel' },
+      { id: 'p-4', name: 'LionLionLion' },
+      { id: 'p-5', name: 'Madison' },
+      { id: 'p-6', name: 'Matvii' },
+      { id: 'p-7', name: 'Svante' },
+      { id: 'p-8', name: 'Noel' },
+      { id: 'p-9', name: 'Oscar' },
+      { id: 'p-10', name: 'Vilhelm' },
+      { id: 'p-11', name: 'Ruben' },
+    ]
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 10,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1,
+      attempts: 72,
+    })
+    const leonel = players.find((player) => player.name === 'Leonel')
+
+    expect(leonel).toBeDefined()
+
+    const leonelStates = getPlayerChunkStates(plan, leonel!.id)
+
+    expect(getSingleChunkPlayBlocks(leonelStates)).toBeLessThanOrEqual(1)
+    expect(getLongestPlayStreak(leonelStates)).toBeGreaterThanOrEqual(2)
+  })
+
+  it('gives Matvii at least one attacking assignment when he logs heavy outfield minutes', () => {
+    const players: Player[] = [
+      { id: 'p-1', name: 'Adam' },
+      { id: 'p-2', name: 'Emil' },
+      { id: 'p-3', name: 'Leonel' },
+      { id: 'p-4', name: 'LionLionLion' },
+      { id: 'p-5', name: 'Madison' },
+      { id: 'p-6', name: 'Matvii' },
+      { id: 'p-7', name: 'Svante' },
+      { id: 'p-8', name: 'Noel' },
+      { id: 'p-9', name: 'Oscar' },
+      { id: 'p-10', name: 'Vilhelm' },
+    ]
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 10,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 3,
+      attempts: 72,
+    })
+    const matvii = plan.summaries.find((summary) => summary.name === 'Matvii')
+
+    expect(matvii?.totalMinutes).toBeGreaterThanOrEqual(40)
+    expect(matvii?.positionsPlayed).toContain('A')
   })
 })
 

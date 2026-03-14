@@ -41,6 +41,9 @@ interface PlayerHistory {
   benchMinutes: number
   playStreak: number
   benchStreak: number
+  lastChunkState: 'active' | 'bench' | null
+  stateTransitions: number
+  shortPlayBlocks: number
   consecutiveBenchViolations: number
   benchViolationWeight: number
   maxBenchStreak: number
@@ -109,13 +112,24 @@ function scoreGroupRotation(
   phase: RotationPhase,
 ) {
   let cost = 0
+  const minutesPlayed = Object.values(snapshot.groupCounts).reduce((total, value) => total + (value ?? 0), 0)
 
-  const sameGroupPenalty = phase === 'period-start' ? 18 : 12
-  const differentGroupBonus = phase === 'period-start' ? 9 : 6
-  const newGroupBonus = phase === 'period-start' ? 12 : 8
-  const oneGroupBreadthBonus = phase === 'period-start' ? 8 : 5
-  const twoGroupBreadthBonus = phase === 'period-start' ? 4 : 2
+  const sameGroupPenalty = phase === 'period-start' ? 20 : 13
+  const differentGroupBonus = phase === 'period-start' ? 10 : 6
+  const newGroupBonus = phase === 'period-start' ? 15 : 10
+  const oneGroupBreadthBonus = phase === 'period-start' ? 12 : 8
+  const twoGroupBreadthBonus = phase === 'period-start' ? 6 : 4
   const groupCountWeight = phase === 'period-start' ? 2.5 : 1.85
+  const attackerDiscoveryBonus =
+    nextGroup === 'ATT' && !groupsPlayed.has('ATT')
+      ? phase === 'period-start'
+        ? minutesPlayed >= 20
+          ? 12
+          : 6
+        : minutesPlayed >= 20
+          ? 10
+          : 5
+      : 0
 
   if (snapshot.lastOutfieldGroup === nextGroup) {
     cost += sameGroupPenalty
@@ -135,6 +149,7 @@ function scoreGroupRotation(
     cost -= twoGroupBreadthBonus
   }
 
+  cost -= attackerDiscoveryBonus
   cost += (snapshot.groupCounts[nextGroup] ?? 0) * groupCountWeight
 
   return cost
@@ -330,11 +345,21 @@ function buildCandidatePlan(
 
       for (const playerId of playerIds) {
         const history = histories[playerId]
-        if (activeSet.has(playerId)) {
+        const isActive = activeSet.has(playerId)
+        const nextState = isActive ? 'active' : 'bench'
+
+        if (history.lastChunkState && history.lastChunkState !== nextState) {
+          history.stateTransitions += 1
+        }
+
+        if (isActive) {
           history.actualMinutes += chunk.durationMinutes
           history.playStreak += 1
           history.benchStreak = 0
         } else {
+          if (history.playStreak === 1) {
+            history.shortPlayBlocks += 1
+          }
           const nextBenchStreak = history.benchStreak + 1
           if (history.benchStreak > 0) {
             history.consecutiveBenchViolations += 1
@@ -346,6 +371,8 @@ function buildCandidatePlan(
           history.maxBenchStreak = Math.max(history.maxBenchStreak, nextBenchStreak)
           substituteSet.add(playerId)
         }
+
+        history.lastChunkState = nextState
       }
 
       if (phase === 'period-start') {
@@ -403,6 +430,12 @@ function buildCandidatePlan(
       chunks,
       substitutes: Array.from(substituteSet).map((playerId) => nameById[playerId]),
     })
+  }
+
+  for (const history of Object.values(histories)) {
+    if (history.playStreak === 1) {
+      history.shortPlayBlocks += 1
+    }
   }
 
   const summaries = players.map((player) => {
@@ -497,6 +530,9 @@ function createHistories(players: Player[], goalkeepers: string[]): Record<strin
         benchMinutes: 0,
         playStreak: 0,
         benchStreak: 0,
+        lastChunkState: null,
+        stateTransitions: 0,
+        shortPlayBlocks: 0,
         consecutiveBenchViolations: 0,
         benchViolationWeight: 0,
         maxBenchStreak: 0,
@@ -686,11 +722,11 @@ function selectInPeriodPlayers({
     const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
     const score =
       criticalGap * 100 +
-      Math.max(remainingNeed, 0) * 10 +
+      Math.max(remainingNeed, 0) * 12 +
       shortagePressure * 30 +
       history.benchStreak * 120 -
-      history.playStreak * 10 -
-      history.actualMinutes * 0.35 +
+      history.actualMinutes * 0.55 +
+      Math.min(history.playStreak, 2) * 20 +
       rng() * 0.01
 
     candidates.push({ playerId, score })
@@ -944,17 +980,24 @@ function scoreCandidate(
       Math.max(history.maxBenchStreak - 1, 0) * 350
     )
   }, 0)
+  const fragmentedMinutesPenalty = Object.values(histories).reduce((total, history) => {
+    return total + history.shortPlayBlocks * 140 + Math.max(history.stateTransitions - 2, 0) * 24
+  }, 0)
   const groupBreadthPenalty = Object.values(histories).reduce((total, history) => {
     if (history.outfieldMinutes <= 10) {
       return total
     }
 
     if (history.groupsPlayed.size === 1) {
-      return total + 28
+      return total + 54
     }
 
-    if (history.outfieldMinutes >= 20 && history.groupsPlayed.size === 2) {
-      return total + 8
+    if (history.outfieldMinutes >= 30 && history.groupsPlayed.size === 2) {
+      return total + 18
+    }
+
+    if (history.outfieldMinutes >= 30 && !history.groupsPlayed.has('ATT')) {
+      return total + 12
     }
 
     return total
@@ -968,6 +1011,7 @@ function scoreCandidate(
     repeatPenalty +
     periodStartPenalty +
     consecutiveBenchPenalty +
+    fragmentedMinutesPenalty +
     groupBreadthPenalty +
     periodStartVariationPenalty
   )
