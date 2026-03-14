@@ -541,15 +541,22 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                 </dl>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {summary.roleGroups.length > 0 ? (
-                    summary.roleGroups.map((group) => (
-                      <span
-                        key={group}
-                        className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 text-xs font-medium text-clay-100"
-                      >
-                        {group}
-                      </span>
-                    ))
+                  {summary.goalkeeperPeriods.length > 0 || summary.roleGroups.length > 0 ? (
+                    <>
+                      {summary.goalkeeperPeriods.length > 0 ? (
+                        <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-100">
+                          MV
+                        </span>
+                      ) : null}
+                      {summary.roleGroups.map((group) => (
+                        <span
+                          key={group}
+                          className="rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 text-xs font-medium text-clay-100"
+                        >
+                          {group}
+                        </span>
+                      ))}
+                    </>
                   ) : (
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-stone-300">
                       Endast målvakt
