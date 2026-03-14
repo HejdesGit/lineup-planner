@@ -1,4 +1,32 @@
-import { type ChangeEvent, type Dispatch, type ReactNode, useMemo, useReducer, useState, useTransition } from 'react'
+import {
+  type ChangeEvent,
+  type Dispatch,
+  type HTMLAttributes,
+  type ReactNode,
+  useMemo,
+  useReducer,
+  useState,
+  useTransition,
+} from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { generateMatchPlan } from './lib/scheduler'
 import {
   FORMATION_PRESETS,
@@ -48,6 +76,9 @@ const DEFAULT_NAMES = BASE_PLAYER_POOL.slice(0, 10)
 const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 5
+const GOALKEEPER_SLOT = 'MV' as const
+
+type BoardSlotId = OutfieldPosition | typeof GOALKEEPER_SLOT
 
 interface FormState {
   playerInput: string
@@ -168,7 +199,7 @@ function App() {
 
             <section className="grid gap-5 xl:grid-cols-3">
               {plan.periods.map((period) => (
-                <PeriodCard key={period.period} period={period} nameById={playerNameById} />
+                <PeriodCard key={`${plan.seed}-${period.period}`} period={period} nameById={playerNameById} />
               ))}
             </section>
 
@@ -560,13 +591,44 @@ function PeriodCard({
   period: PeriodPlan
   nameById: Record<string, string>
 }) {
+  const [boardAssignments, setBoardAssignments] = useState<Record<BoardSlotId, string>>(() =>
+    createBoardAssignments(period),
+  )
+  const [lockedSlots, setLockedSlots] = useState<BoardSlotId[]>([])
+  const [activeSlot, setActiveSlot] = useState<BoardSlotId | null>(null)
+  const displayLineup = getBoardLineup(boardAssignments, period.positions)
+  const displayGoalkeeperId = boardAssignments[GOALKEEPER_SLOT]
+  const displayGoalkeeperName = nameById[displayGoalkeeperId] ?? period.goalkeeperName
+
+  const handleToggleLock = (slotId: BoardSlotId) => {
+    setLockedSlots((current) =>
+      current.includes(slotId) ? current.filter((entry) => entry !== slotId) : [...current, slotId],
+    )
+  }
+
+  const handleSwapSlots = (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => {
+    if (sourceSlot === targetSlot) {
+      return
+    }
+
+    if (lockedSlots.includes(sourceSlot) || lockedSlots.includes(targetSlot)) {
+      return
+    }
+
+    setBoardAssignments((current) => ({
+      ...current,
+      [sourceSlot]: current[targetSlot],
+      [targetSlot]: current[sourceSlot],
+    }))
+  }
+
   return (
     <article className="rounded-[1.5rem] border border-white/10 bg-white/5 p-3.5 backdrop-blur sm:rounded-[1.75rem] sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.24em] text-clay-200">Period {period.period}</p>
           <h2 className="mt-1 font-display text-2xl font-black text-white sm:text-3xl">
-            MV: {period.goalkeeperName}
+            MV: {displayGoalkeeperName}
           </h2>
           <p className="mt-1 text-sm text-stone-300">Formation: {period.formation}</p>
         </div>
@@ -580,9 +642,15 @@ function PeriodCard({
 
       <FormationBoard
         formation={period.formation}
-        lineup={period.startingLineup}
-        goalkeeper={period.goalkeeperName}
+        lineup={displayLineup}
+        goalkeeperId={displayGoalkeeperId}
         nameById={nameById}
+        lockedSlots={lockedSlots}
+        onToggleLock={handleToggleLock}
+        onSwapSlots={handleSwapSlots}
+        activeSlot={activeSlot}
+        onDragStart={setActiveSlot}
+        onDragEnd={() => setActiveSlot(null)}
       />
 
       <div className="mt-4 space-y-3 sm:mt-5">
@@ -590,6 +658,7 @@ function PeriodCard({
           const nextChunk = period.chunks[chunkIndex + 1]
           const currentIncomingIds = new Set(chunk.substitutions.map((substitution) => substitution.playerInId))
           const nextOutgoingIds = new Set(nextChunk?.substitutions.map((substitution) => substitution.playerOutId) ?? [])
+          const chunkLineup = chunkIndex === 0 ? displayLineup : chunk.lineup
 
           return (
             <div
@@ -623,8 +692,8 @@ function PeriodCard({
 
               <div className="grid gap-2 sm:grid-cols-2">
                 {period.positions.map((position) => {
-                  const playerId = chunk.lineup[position]
-                  const playerName = readLineupPlayer(chunk.lineup, position, nameById)
+                  const playerId = chunkLineup[position]
+                  const playerName = readLineupPlayer(chunkLineup, position, nameById)
                   const isIncomingNow = playerId ? currentIncomingIds.has(playerId) : false
                   const isOutgoingNext = playerId ? nextOutgoingIds.has(playerId) : false
 
@@ -654,36 +723,116 @@ function PeriodCard({
 function FormationBoard({
   formation,
   lineup,
-  goalkeeper,
+  goalkeeperId,
   nameById,
+  lockedSlots,
+  onToggleLock,
+  onSwapSlots,
+  activeSlot,
+  onDragStart,
+  onDragEnd,
 }: {
   formation: FormationKey
   lineup: Lineup
-  goalkeeper: string
+  goalkeeperId: string
   nameById: Record<string, string>
+  lockedSlots: BoardSlotId[]
+  onToggleLock: (slotId: BoardSlotId) => void
+  onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
+  activeSlot: BoardSlotId | null
+  onDragStart: (slotId: BoardSlotId | null) => void
+  onDragEnd: () => void
 }) {
+  const slotOrder = useMemo<BoardSlotId[]>(
+    () => [...FORMATION_PRESETS[formation].positions, GOALKEEPER_SLOT],
+    [formation],
+  )
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 120, tolerance: 10 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
+  const activePlayer = activeSlot ? readBoardSlotPlayerName(activeSlot, lineup, goalkeeperId, nameById) : null
+  const activeTone = activeSlot ? getBoardSlotTone(activeSlot) : null
+
+  const handleDragStart = (event: DragStartEvent) => {
+    onDragStart(event.active.id as BoardSlotId)
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    onDragEnd()
+
+    if (!over || active.id === over.id) {
+      return
+    }
+
+    onSwapSlots(active.id as BoardSlotId, over.id as BoardSlotId)
+  }
+
   return (
-    <div className="rounded-[1.35rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-2.5 sm:rounded-[1.75rem] sm:p-4">
-      <div className="rounded-[1.2rem] border border-white/10 border-dashed p-3 sm:rounded-[1.5rem] sm:p-4">
-        <div className="space-y-3 sm:space-y-4">
-          {FORMATION_PRESETS[formation].rows.map((row) => (
-            <FormationRow key={`${formation}-${row.join('-')}`}>
-              {row.map((position) => (
-                <PositionBadge
-                  key={position}
-                  label={position}
-                  player={readLineupPlayer(lineup, position, nameById)}
-                  tone={getPositionTone(position)}
-                />
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={onDragEnd}>
+      <SortableContext items={slotOrder} strategy={rectSortingStrategy}>
+        <div className="rounded-[1.35rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-2.5 sm:rounded-[1.75rem] sm:p-4">
+          <div className="rounded-[1.2rem] border border-white/10 border-dashed p-3 sm:rounded-[1.5rem] sm:p-4">
+            <div className="mb-3 flex justify-end">
+              <p className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-right font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
+                Dra eller tryck-dra för att byta plats
+                <span className="block text-[9px] tracking-[0.18em] text-stone-500">Låsta brickor ligger fast</span>
+              </p>
+            </div>
+            <div className="space-y-3 sm:space-y-4">
+              {FORMATION_PRESETS[formation].rows.map((row) => (
+                <FormationRow key={`${formation}-${row.join('-')}`}>
+                  {row.map((position) => (
+                    <PositionBadge
+                      key={position}
+                      slotId={position}
+                      label={position}
+                      player={readLineupPlayer(lineup, position, nameById)}
+                      tone={getPositionTone(position)}
+                      locked={lockedSlots.includes(position)}
+                      isActive={activeSlot === position}
+                      onToggleLock={onToggleLock}
+                    />
+                  ))}
+                </FormationRow>
               ))}
-            </FormationRow>
-          ))}
-          <div className="mx-auto mt-1.5 flex max-w-32 justify-center border-t border-dashed border-white/10 pt-3 sm:mt-2 sm:max-w-40 sm:pt-4">
-            <PositionBadge label="MV" player={goalkeeper} tone="gk" />
+              <div className="mx-auto mt-1.5 flex max-w-32 justify-center border-t border-dashed border-white/10 pt-3 sm:mt-2 sm:max-w-40 sm:pt-4">
+                <PositionBadge
+                  slotId={GOALKEEPER_SLOT}
+                  label="MV"
+                  player={nameById[goalkeeperId] ?? '-'}
+                  tone="gk"
+                  locked={lockedSlots.includes(GOALKEEPER_SLOT)}
+                  isActive={activeSlot === GOALKEEPER_SLOT}
+                  onToggleLock={onToggleLock}
+                />
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      </SortableContext>
+      <DragOverlay dropAnimation={null}>
+        {activeSlot && activePlayer && activeTone ? (
+          <PositionBadgeCard
+            label={activeSlot}
+            player={activePlayer}
+            tone={activeTone}
+            locked={lockedSlots.includes(activeSlot)}
+            isActive
+            isOverlay
+            onToggleLock={undefined}
+          />
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   )
 }
 
@@ -756,13 +905,72 @@ function FormationRow({ children }: { children: ReactNode }) {
 }
 
 function PositionBadge({
+  slotId,
   label,
   player,
   tone,
+  locked,
+  isActive,
+  onToggleLock,
+}: {
+  slotId: BoardSlotId
+  label: string
+  player: string
+  tone: 'def' | 'mid' | 'att' | 'gk'
+  locked: boolean
+  isActive: boolean
+  onToggleLock: (slotId: BoardSlotId) => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: slotId,
+    disabled: locked,
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className={isDragging ? 'z-20' : undefined}>
+      <PositionBadgeCard
+        label={label}
+        player={player}
+        tone={tone}
+        locked={locked}
+        isActive={isDragging || isActive}
+        onToggleLock={onToggleLock ? () => onToggleLock(slotId) : undefined}
+        dragHandleProps={locked ? undefined : { ...attributes, ...listeners }}
+      />
+    </div>
+  )
+}
+
+function PositionBadgeCard({
+  label,
+  player,
+  tone,
+  locked,
+  isActive,
+  isOverlay = false,
+  onToggleLock,
+  dragHandleProps,
 }: {
   label: string
   player: string
   tone: 'def' | 'mid' | 'att' | 'gk'
+  locked: boolean
+  isActive: boolean
+  isOverlay?: boolean
+  onToggleLock?: () => void
+  dragHandleProps?: HTMLAttributes<HTMLDivElement>
 }) {
   const tones = {
     def: 'border-sky-300/35 bg-[linear-gradient(180deg,rgba(56,189,248,0.22),rgba(12,74,110,0.34))] text-sky-50 shadow-[inset_0_1px_0_rgba(186,230,253,0.12),0_0_0_1px_rgba(12,74,110,0.16)]',
@@ -773,10 +981,48 @@ function PositionBadge({
 
   return (
     <div
-      className={`min-w-[5.4rem] rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]}`}
+      className={`group relative min-w-[5.4rem] touch-manipulation select-none rounded-[1rem] border px-2 py-2 text-center sm:min-w-28 sm:rounded-[1.2rem] sm:px-3 sm:py-3 ${tones[tone]} ${
+        locked ? 'ring-2 ring-clay-200/40 shadow-[0_0_0_2px_rgba(251,191,36,0.16)]' : ''
+      } ${isActive ? 'scale-[1.02] shadow-2xl' : ''} ${isOverlay ? 'opacity-95' : ''}`}
+      {...dragHandleProps}
     >
-      <p className="font-mono text-[10px] uppercase tracking-[0.28em] opacity-75">{label}</p>
-      <p className="mt-1 text-xs font-semibold sm:text-sm">{player}</p>
+      {locked ? (
+        <>
+          <div className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[repeating-linear-gradient(-45deg,rgba(251,191,36,0.14),rgba(251,191,36,0.14)_7px,transparent_7px,transparent_15px)] opacity-70" />
+          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-full border border-clay-200/40 bg-black/35 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-clay-50">
+            Låst
+          </div>
+        </>
+      ) : null}
+      {onToggleLock ? (
+        <button
+          type="button"
+          onPointerDown={(event) => {
+            event.stopPropagation()
+          }}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleLock()
+          }}
+          className={`absolute right-2 top-2 z-10 rounded-full border px-1.5 py-1 font-mono text-[9px] uppercase tracking-[0.18em] ${
+            locked
+              ? 'border-clay-200/50 bg-clay-400/30 text-clay-50'
+              : 'border-white/10 bg-black/20 text-stone-300'
+          }`}
+          aria-label={locked ? `Lås upp ${player} på ${label}` : `Lås ${player} på ${label}`}
+        >
+          {locked ? 'Låst' : 'Lås'}
+        </button>
+      ) : null}
+      <div className="pointer-events-none relative z-[1]">
+        <p className="font-mono text-[10px] uppercase tracking-[0.28em] opacity-75">{label}</p>
+        <p className="mt-1 text-xs font-semibold sm:text-sm">{player}</p>
+        {locked ? (
+          <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.22em] text-clay-100/85">
+            Positionen ligger fast
+          </p>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -844,6 +1090,34 @@ function buildPlayerDetail(
       }
     }),
   }
+}
+
+function createBoardAssignments(period: PeriodPlan): Record<BoardSlotId, string> {
+  return {
+    ...Object.fromEntries(
+      period.positions.map((position) => [position, period.startingLineup[position] ?? '']),
+    ),
+    [GOALKEEPER_SLOT]: period.goalkeeperId,
+  } as Record<BoardSlotId, string>
+}
+
+function getBoardLineup(
+  boardAssignments: Record<BoardSlotId, string>,
+  positions: readonly OutfieldPosition[],
+): Lineup {
+  return Object.fromEntries(
+    positions.map((position) => [position, boardAssignments[position]]),
+  ) as Lineup
+}
+
+function readBoardSlotPlayerName(
+  slotId: BoardSlotId,
+  lineup: Lineup,
+  goalkeeperId: string,
+  nameById: Record<string, string>,
+) {
+  const playerId = slotId === GOALKEEPER_SLOT ? goalkeeperId : lineup[slotId]
+  return playerId ? nameById[playerId] ?? '-' : '-'
 }
 
 function normalizePlayers(input: string): Player[] {
@@ -961,6 +1235,10 @@ function getPositionTone(position: OutfieldPosition) {
   }
 
   return 'mid'
+}
+
+function getBoardSlotTone(slotId: BoardSlotId) {
+  return slotId === GOALKEEPER_SLOT ? 'gk' : getPositionTone(slotId)
 }
 
 export default App

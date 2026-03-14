@@ -23,4 +23,14 @@ describe('App', () => {
     expect(screen.getByText(/MV: Ada/i)).toBeInTheDocument()
     expect(screen.getByText(/speltid per spelare/i)).toBeInTheDocument()
   })
+
+  it('shows a stronger lock state on the formation board', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /lås henry på vm/i }))
+
+    expect(screen.getByRole('button', { name: /lås upp henry på vm/i })).toBeInTheDocument()
+    expect(screen.getByText(/positionen ligger fast/i)).toBeInTheDocument()
+  })
 })
