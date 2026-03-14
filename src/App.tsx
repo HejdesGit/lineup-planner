@@ -637,12 +637,22 @@ function PeriodCard({
   const displayLineup = getBoardLineup(boardAssignments, period.positions)
   const displayGoalkeeperId = boardAssignments[GOALKEEPER_SLOT]
   const displayGoalkeeperName = nameById[displayGoalkeeperId] ?? period.goalkeeperName
+  const canPreviewSwap = Boolean(
+    activeSlot &&
+      overSlot &&
+      activeSlot !== overSlot &&
+      !lockedSlots.includes(activeSlot) &&
+      !lockedSlots.includes(overSlot),
+  )
   const previewAssignments = useMemo(
-    () =>
-      activeSlot && overSlot && activeSlot !== overSlot
-        ? swapBoardAssignments(boardAssignments, activeSlot, overSlot)
-        : boardAssignments,
-    [activeSlot, boardAssignments, overSlot],
+    () => {
+      if (!canPreviewSwap || !activeSlot || !overSlot) {
+        return boardAssignments
+      }
+
+      return swapBoardAssignments(boardAssignments, activeSlot, overSlot)
+    },
+    [activeSlot, boardAssignments, canPreviewSwap, overSlot],
   )
   const previewLineup = getBoardLineup(previewAssignments, period.positions)
   const previewGoalkeeperId = previewAssignments[GOALKEEPER_SLOT]
@@ -829,6 +839,8 @@ function FormationBoard({
             },
           ]
         }
+
+        return []
       }
 
       return closestCenter(args)
@@ -864,7 +876,14 @@ function FormationBoard({
   }
 
   const handleDragOver = (event: DragOverEvent) => {
-    syncHoveredSlot(event.over ? (event.over.id as BoardSlotId) : null)
+    const candidateSlot = event.over ? (event.over.id as BoardSlotId) : null
+
+    if (candidateSlot && lockedSlots.includes(candidateSlot)) {
+      syncHoveredSlot(null)
+      return
+    }
+
+    syncHoveredSlot(candidateSlot)
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -873,7 +892,7 @@ function FormationBoard({
     hoveredSlotRef.current = null
     onDragEnd()
 
-    if (!targetSlot || active.id === targetSlot) {
+    if (!targetSlot || active.id === targetSlot || lockedSlots.includes(targetSlot)) {
       return
     }
 
