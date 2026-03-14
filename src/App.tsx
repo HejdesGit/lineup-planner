@@ -32,6 +32,15 @@ import {
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import { generateMatchPlan } from './lib/scheduler'
 import {
+  GOALKEEPER_SLOT,
+  applyPeriodOverrides,
+  createBoardAssignments,
+  getBoardLineup,
+  swapBoardAssignments,
+  type BoardSlotId,
+  type PeriodBoardOverrides,
+} from './lib/planOverrides'
+import {
   FORMATION_PRESETS,
   type FormationKey,
   type Lineup,
@@ -79,9 +88,6 @@ const DEFAULT_NAMES = BASE_PLAYER_POOL.slice(0, 10)
 const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 5
-const GOALKEEPER_SLOT = 'MV' as const
-
-type BoardSlotId = OutfieldPosition | typeof GOALKEEPER_SLOT
 
 interface FormState {
   playerInput: string
@@ -150,11 +156,16 @@ function App() {
       seed: 20260314,
     })
   })
+  const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>({})
 
   const playerOptions = useMemo(() => getPlayerOptions(formState.playerInput), [formState.playerInput])
+  const displayPlan = useMemo(
+    () => (plan ? applyPeriodOverrides(plan, periodOverrides) : null),
+    [periodOverrides, plan],
+  )
 
-  const playerNameById = plan
-    ? Object.fromEntries(plan.summaries.map((summary) => [summary.playerId, summary.name]))
+  const playerNameById = displayPlan
+    ? Object.fromEntries(displayPlan.summaries.map((summary) => [summary.playerId, summary.name]))
     : {}
 
   const handleGenerate = () => {
@@ -172,6 +183,7 @@ function App() {
       dispatch({ type: 'clearErrors' })
       startTransition(() => {
         setPlan(nextPlan)
+        setPeriodOverrides({})
       })
     } catch (error) {
       dispatch({
@@ -179,6 +191,7 @@ function App() {
         value: [error instanceof Error ? error.message : 'Något gick fel vid generering.'],
       })
       setPlan(null)
+      setPeriodOverrides({})
     }
   }
 
@@ -196,17 +209,37 @@ function App() {
           />
         </header>
 
-        {plan ? (
+        {displayPlan && plan ? (
           <>
-            <MatchOverview plan={plan} playerNameById={playerNameById} />
+            <MatchOverview plan={displayPlan} playerNameById={playerNameById} />
 
             <section className="grid gap-5 xl:grid-cols-3">
-              {plan.periods.map((period) => (
-                <PeriodCard key={`${plan.seed}-${period.period}`} period={period} nameById={playerNameById} />
+              {displayPlan.periods.map((period, index) => (
+                <PeriodCard
+                  key={`${displayPlan.seed}-${period.period}`}
+                  period={period}
+                  boardAssignments={periodOverrides[period.period] ?? createBoardAssignments(plan.periods[index])}
+                  nameById={playerNameById}
+                  onSwapSlots={(sourceSlot, targetSlot) => {
+                    setPeriodOverrides((current) => {
+                      const currentAssignments =
+                        current[period.period] ?? createBoardAssignments(plan.periods[index])
+
+                      return {
+                        ...current,
+                        [period.period]: swapBoardAssignments(
+                          currentAssignments,
+                          sourceSlot,
+                          targetSlot,
+                        ),
+                      }
+                    })
+                  }}
+                />
               ))}
             </section>
 
-            <PlayerMinutesSection plan={plan} />
+            <PlayerMinutesSection plan={displayPlan} />
           </>
         ) : (
           <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-8 text-center text-stone-300">
@@ -589,14 +622,15 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
 
 function PeriodCard({
   period,
+  boardAssignments,
   nameById,
+  onSwapSlots,
 }: {
   period: PeriodPlan
+  boardAssignments: Record<BoardSlotId, string>
   nameById: Record<string, string>
+  onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
 }) {
-  const [boardAssignments, setBoardAssignments] = useState<Record<BoardSlotId, string>>(() =>
-    createBoardAssignments(period),
-  )
   const [lockedSlots, setLockedSlots] = useState<BoardSlotId[]>([])
   const [activeSlot, setActiveSlot] = useState<BoardSlotId | null>(null)
   const [overSlot, setOverSlot] = useState<BoardSlotId | null>(null)
@@ -620,7 +654,7 @@ function PeriodCard({
     )
   }
 
-  const handleSwapSlots = (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => {
+  const handleSwapAttempt = (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => {
     if (sourceSlot === targetSlot) {
       return
     }
@@ -629,11 +663,7 @@ function PeriodCard({
       return
     }
 
-    setBoardAssignments((current) => ({
-      ...current,
-      [sourceSlot]: current[targetSlot],
-      [targetSlot]: current[sourceSlot],
-    }))
+    onSwapSlots(sourceSlot, targetSlot)
   }
 
   return (
@@ -661,7 +691,7 @@ function PeriodCard({
         nameById={nameById}
         lockedSlots={lockedSlots}
         onToggleLock={handleToggleLock}
-        onSwapSlots={handleSwapSlots}
+        onSwapSlots={handleSwapAttempt}
         activeSlot={activeSlot}
         overSlot={overSlot}
         activePlayerName={activePlayerName ? nameById[activePlayerName] ?? null : null}
@@ -1204,36 +1234,6 @@ function buildPlayerDetail(
         windows,
       }
     }),
-  }
-}
-
-function createBoardAssignments(period: PeriodPlan): Record<BoardSlotId, string> {
-  return {
-    ...Object.fromEntries(
-      period.positions.map((position) => [position, period.startingLineup[position] ?? '']),
-    ),
-    [GOALKEEPER_SLOT]: period.goalkeeperId,
-  } as Record<BoardSlotId, string>
-}
-
-function getBoardLineup(
-  boardAssignments: Record<BoardSlotId, string>,
-  positions: readonly OutfieldPosition[],
-): Lineup {
-  return Object.fromEntries(
-    positions.map((position) => [position, boardAssignments[position]]),
-  ) as Lineup
-}
-
-function swapBoardAssignments(
-  boardAssignments: Record<BoardSlotId, string>,
-  sourceSlot: BoardSlotId,
-  targetSlot: BoardSlotId,
-) {
-  return {
-    ...boardAssignments,
-    [sourceSlot]: boardAssignments[targetSlot],
-    [targetSlot]: boardAssignments[sourceSlot],
   }
 }
 

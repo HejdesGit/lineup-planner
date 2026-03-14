@@ -1,0 +1,176 @@
+import {
+  ROLE_GROUPS,
+  type Lineup,
+  type MatchPlan,
+  type OutfieldPosition,
+  type PeriodPlan,
+  type PlayerSummary,
+} from './types'
+
+export const GOALKEEPER_SLOT = 'MV' as const
+
+export type BoardSlotId = OutfieldPosition | typeof GOALKEEPER_SLOT
+export type PeriodBoardOverrides = Partial<Record<number, Record<BoardSlotId, string>>>
+
+export function createBoardAssignments(period: PeriodPlan): Record<BoardSlotId, string> {
+  return {
+    ...Object.fromEntries(
+      period.positions.map((position) => [position, period.startingLineup[position] ?? '']),
+    ),
+    [GOALKEEPER_SLOT]: period.goalkeeperId,
+  } as Record<BoardSlotId, string>
+}
+
+export function getBoardLineup(
+  boardAssignments: Record<BoardSlotId, string>,
+  positions: readonly OutfieldPosition[],
+): Lineup {
+  return Object.fromEntries(
+    positions.map((position) => [position, boardAssignments[position]]),
+  ) as Lineup
+}
+
+export function swapBoardAssignments(
+  boardAssignments: Record<BoardSlotId, string>,
+  sourceSlot: BoardSlotId,
+  targetSlot: BoardSlotId,
+) {
+  return {
+    ...boardAssignments,
+    [sourceSlot]: boardAssignments[targetSlot],
+    [targetSlot]: boardAssignments[sourceSlot],
+  }
+}
+
+export function applyPeriodOverrides(
+  plan: MatchPlan,
+  overrides: PeriodBoardOverrides,
+): MatchPlan {
+  if (Object.keys(overrides).length === 0) {
+    return plan
+  }
+
+  const playerNameById = Object.fromEntries(
+    plan.summaries.map((summary) => [summary.playerId, summary.name]),
+  )
+  const allPlayerIds = plan.summaries.map((summary) => summary.playerId)
+
+  const periods = plan.periods.map((period) => {
+    const overrideAssignments = overrides[period.period]
+
+    if (!overrideAssignments) {
+      return period
+    }
+
+    const originalAssignments = createBoardAssignments(period)
+    const playerMapping = Object.fromEntries(
+      (Object.keys(originalAssignments) as BoardSlotId[]).map((slotId) => [
+        originalAssignments[slotId],
+        overrideAssignments[slotId],
+      ]),
+    ) as Record<string, string>
+
+    const chunks = period.chunks.map((chunk) => {
+      const activePlayerIds = chunk.activePlayerIds.map(
+        (playerId) => playerMapping[playerId] ?? playerId,
+      )
+      const substituteIds = allPlayerIds.filter((playerId) => !activePlayerIds.includes(playerId))
+
+      return {
+        ...chunk,
+        goalkeeperId: playerMapping[chunk.goalkeeperId] ?? chunk.goalkeeperId,
+        goalkeeperName:
+          playerNameById[playerMapping[chunk.goalkeeperId] ?? chunk.goalkeeperId],
+        lineup: Object.fromEntries(
+          period.positions.map((position) => {
+            const playerId = chunk.lineup[position]
+            return [position, playerId ? playerMapping[playerId] ?? playerId : playerId]
+          }),
+        ) as Lineup,
+        activePlayerIds,
+        substitutes: substituteIds.map((playerId) => playerNameById[playerId]),
+        substitutions: chunk.substitutions.map((substitution) => ({
+          ...substitution,
+          playerInId: playerMapping[substitution.playerInId] ?? substitution.playerInId,
+          playerOutId: playerMapping[substitution.playerOutId] ?? substitution.playerOutId,
+        })),
+      }
+    })
+
+    const substituteIds = Array.from(
+      new Set(
+        chunks.flatMap((chunk) =>
+          allPlayerIds.filter((playerId) => !chunk.activePlayerIds.includes(playerId)),
+        ),
+      ),
+    )
+
+    return {
+      ...period,
+      goalkeeperId: playerMapping[period.goalkeeperId] ?? period.goalkeeperId,
+      goalkeeperName: playerNameById[playerMapping[period.goalkeeperId] ?? period.goalkeeperId],
+      startingLineup: getBoardLineup(overrideAssignments, period.positions),
+      chunks,
+      substitutes: substituteIds.map((playerId) => playerNameById[playerId]),
+    }
+  })
+
+  return {
+    ...plan,
+    periods,
+    goalkeepers: periods.map((period) => period.goalkeeperId),
+    summaries: buildSummariesFromPeriods(plan.summaries, periods, playerNameById),
+  }
+}
+
+export function buildSummariesFromPeriods(
+  baseSummaries: PlayerSummary[],
+  periods: PeriodPlan[],
+  playerNameById: Record<string, string>,
+): PlayerSummary[] {
+  return baseSummaries.map((summary) => {
+    let totalMinutes = 0
+    let benchMinutes = 0
+    const goalkeeperPeriods: number[] = []
+    const positionsPlayed = new Set<OutfieldPosition>()
+    const roleGroups = new Set<PlayerSummary['roleGroups'][number]>()
+
+    for (const period of periods) {
+      let wasGoalkeeperInPeriod = false
+
+      for (const chunk of period.chunks) {
+        if (chunk.goalkeeperId === summary.playerId) {
+          totalMinutes += chunk.durationMinutes
+          wasGoalkeeperInPeriod = true
+          continue
+        }
+
+        const playedPosition = period.positions.find(
+          (position) => chunk.lineup[position] === summary.playerId,
+        )
+
+        if (playedPosition) {
+          totalMinutes += chunk.durationMinutes
+          positionsPlayed.add(playedPosition)
+          roleGroups.add(ROLE_GROUPS[playedPosition])
+        } else {
+          benchMinutes += chunk.durationMinutes
+        }
+      }
+
+      if (wasGoalkeeperInPeriod) {
+        goalkeeperPeriods.push(period.period)
+      }
+    }
+
+    return {
+      ...summary,
+      name: playerNameById[summary.playerId] ?? summary.name,
+      totalMinutes,
+      benchMinutes,
+      goalkeeperPeriods,
+      positionsPlayed: Array.from(positionsPlayed),
+      roleGroups: (['DEF', 'MID', 'ATT'] as const).filter((group) => roleGroups.has(group)),
+    }
+  })
+}

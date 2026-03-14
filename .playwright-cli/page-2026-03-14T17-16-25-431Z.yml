@@ -1,0 +1,937 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - paragraph [ref=e7]: 7v7 match planner
+        - generic [ref=e8]:
+          - heading "Planera målvakt, utespelare och byten utan att låsa laget i samma roller." [level=1] [ref=e9]
+          - paragraph [ref=e10]: Målvakten hålls utanför formationen. Du väljer mellan 2-3-1 och 3-2-1, samt spelfönster mellan 5 och 10 minuter.
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - heading "Matchinställningar" [level=2] [ref=e14]
+            - paragraph [ref=e15]: Skriv namn, välj formation och justera hur ofta du vill kunna byta.
+          - generic [ref=e16]: 3 perioder
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - generic [ref=e19]:
+              - generic [ref=e20]: Spelare
+              - generic [ref=e21]:
+                - button "Fyll 8" [ref=e22] [cursor=pointer]
+                - button "Fyll 10" [ref=e23] [cursor=pointer]
+                - button "Fyll 12" [ref=e24] [cursor=pointer]
+                - button "Fyll i Alla" [ref=e25] [cursor=pointer]
+            - textbox "Spelare" [ref=e26]:
+              - /placeholder: En spelare per rad
+              - text: Adam Anton Bill Dante David Elias Emil Gunnar Henry Jax
+            - paragraph [ref=e27]: En rad per spelare. Du kan också separera namn med komma. Fyll 8/10/12 slumpas från baslistan, medan Fyll i Alla lägger in hela spelarpoolen.
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - text: Matchformat
+              - generic [ref=e30]:
+                - combobox "Matchformat" [ref=e31]:
+                  - option "3 x 15 minuter"
+                  - option "3 x 20 minuter" [selected]
+                - generic:
+                  - img
+            - generic [ref=e32]:
+              - text: Formation
+              - generic [ref=e33]:
+                - combobox "Formation" [ref=e34]:
+                  - option "2-3-1" [selected]
+                  - option "3-2-1"
+                - generic:
+                  - img
+          - generic [ref=e36]:
+            - text: Spelfönster
+            - generic [ref=e37]:
+              - combobox "Spelfönster" [ref=e38]:
+                - option "5 minuter" [selected]
+                - option "6 minuter"
+                - option "7 minuter"
+                - option "8 minuter"
+                - option "9 minuter"
+                - option "10 minuter"
+              - generic:
+                - img
+            - paragraph [ref=e39]: Spelarna håller uppställningen hela fönstret och byter när fönstret slutar. Om perioden inte går jämnt upp blir sista fönstret kortare.
+          - generic [ref=e40]:
+            - generic [ref=e41]:
+              - text: Målvakt period 1
+              - generic [ref=e42]:
+                - combobox "Målvakt period 1" [ref=e43]:
+                  - option "Auto" [selected]
+                  - option "Adam"
+                  - option "Anton"
+                  - option "Bill"
+                  - option "Dante"
+                  - option "David"
+                  - option "Elias"
+                  - option "Emil"
+                  - option "Gunnar"
+                  - option "Henry"
+                  - option "Jax"
+                - generic:
+                  - img
+              - paragraph [ref=e44]: Lämna på Auto om appen ska välja.
+            - generic [ref=e45]:
+              - text: Målvakt period 2
+              - generic [ref=e46]:
+                - combobox "Målvakt period 2" [ref=e47]:
+                  - option "Auto" [selected]
+                  - option "Adam"
+                  - option "Anton"
+                  - option "Bill"
+                  - option "Dante"
+                  - option "David"
+                  - option "Elias"
+                  - option "Emil"
+                  - option "Gunnar"
+                  - option "Henry"
+                  - option "Jax"
+                - generic:
+                  - img
+              - paragraph [ref=e48]: Lämna på Auto om appen ska välja.
+            - generic [ref=e49]:
+              - text: Målvakt period 3
+              - generic [ref=e50]:
+                - combobox "Målvakt period 3" [ref=e51]:
+                  - option "Auto" [selected]
+                  - option "Adam"
+                  - option "Anton"
+                  - option "Bill"
+                  - option "Dante"
+                  - option "David"
+                  - option "Elias"
+                  - option "Emil"
+                  - option "Gunnar"
+                  - option "Henry"
+                  - option "Jax"
+                - generic:
+                  - img
+              - paragraph [ref=e52]: Lämna på Auto om appen ska välja.
+          - button "Generera uppställning" [ref=e53] [cursor=pointer]
+    - generic [ref=e54]:
+      - generic [ref=e55]:
+        - generic [ref=e56]:
+          - heading "Matchöversikt" [level=2] [ref=e57]
+          - paragraph [ref=e58]: Seed 20735454 · Score 1106.0
+        - generic [ref=e59]: 20 min/period
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - paragraph [ref=e62]: Målvakter
+          - paragraph [ref=e63]: David, Adam, Jax
+        - generic [ref=e64]:
+          - paragraph [ref=e65]: Formation
+          - paragraph [ref=e66]: 2-3-1
+        - generic [ref=e67]:
+          - paragraph [ref=e68]: Spelare
+          - paragraph [ref=e69]: 10 st
+        - generic [ref=e70]:
+          - paragraph [ref=e71]: Byten
+          - paragraph [ref=e72]: var 5:e min
+        - generic [ref=e73]:
+          - paragraph [ref=e74]: Totaltid
+          - paragraph [ref=e75]: 60 min match
+    - generic [ref=e76]:
+      - article [ref=e77]:
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - paragraph [ref=e80]: Period 1
+            - 'heading "MV: David" [level=2] [ref=e81]'
+            - paragraph [ref=e82]: "Formation: 2-3-1"
+          - generic [ref=e83]:
+            - paragraph [ref=e84]: Startbänk
+            - paragraph [ref=e85]: Adam, Emil, Jax
+        - generic [ref=e87]:
+          - paragraph [ref=e89]:
+            - text: Dra eller tryck-dra för att byta plats
+            - generic [ref=e90]: Låsta brickor ligger fast
+          - generic [ref=e91]:
+            - button "Lås Anton på A A Anton" [ref=e94] [cursor=pointer]:
+              - button "Lås Anton på A" [ref=e95]: Lås
+              - generic:
+                - paragraph: A
+                - paragraph: Anton
+            - generic [ref=e96]:
+              - button "Lås Henry på VM VM Henry" [ref=e98] [cursor=pointer]:
+                - button "Lås Henry på VM" [ref=e99]: Lås
+                - generic:
+                  - paragraph: VM
+                  - paragraph: Henry
+              - button "Lås Dante på CM CM Dante" [ref=e101] [cursor=pointer]:
+                - button "Lås Dante på CM" [ref=e102]: Lås
+                - generic:
+                  - paragraph: CM
+                  - paragraph: Dante
+              - button "Lås Gunnar på HM HM Gunnar" [ref=e104] [cursor=pointer]:
+                - button "Lås Gunnar på HM" [ref=e105]: Lås
+                - generic:
+                  - paragraph: HM
+                  - paragraph: Gunnar
+            - generic [ref=e106]:
+              - button "Lås Elias på VB VB Elias" [ref=e108] [cursor=pointer]:
+                - button "Lås Elias på VB" [ref=e109]: Lås
+                - generic:
+                  - paragraph: VB
+                  - paragraph: Elias
+              - button "Lås Bill på HB HB Bill" [ref=e111] [cursor=pointer]:
+                - button "Lås Bill på HB" [ref=e112]: Lås
+                - generic:
+                  - paragraph: HB
+                  - paragraph: Bill
+            - button "Lås David på MV MV David" [ref=e115] [cursor=pointer]:
+              - button "Lås David på MV" [ref=e116]: Lås
+              - generic:
+                - paragraph: MV
+                - paragraph: David
+        - status [ref=e117]
+        - generic [ref=e118]:
+          - generic [ref=e119]:
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - paragraph [ref=e122]: 0-5 min
+                - paragraph [ref=e123]: Spelfönster 1 · byte efter 5 min
+              - paragraph [ref=e124]: "Bänk: Adam, Emil, Jax"
+            - paragraph [ref=e125]: Startuppställning eller inga byten i detta fönster.
+            - generic [ref=e126]:
+              - generic [ref=e127]:
+                - generic [ref=e128]: VB
+                - generic [ref=e129]: Elias
+              - generic [ref=e130]:
+                - generic [ref=e131]: HB
+                - generic [ref=e132]: Bill
+              - generic [ref=e133]:
+                - generic [ref=e134]: VM
+                - generic [ref=e135]: Henry
+              - generic [ref=e136]:
+                - generic [ref=e137]: CM
+                - generic [ref=e138]: Dante
+              - generic [ref=e139]:
+                - generic [ref=e140]: HM
+                - generic [ref=e141]: Gunnar
+              - generic [ref=e142]:
+                - generic [ref=e143]: A
+                - generic [ref=e144]: Anton
+          - generic [ref=e145]:
+            - generic [ref=e146]:
+              - generic [ref=e147]:
+                - paragraph [ref=e148]: 5-10 min
+                - paragraph [ref=e149]: Spelfönster 2 · byte efter 5 min
+              - paragraph [ref=e150]: "Bänk: Anton, Dante, Gunnar"
+            - paragraph [ref=e151]:
+              - text: "Byte:"
+              - generic [ref=e152]:
+                - text: Emil in, Dante
+                - generic [ref=e153]: ut (CM)
+                - text: ·
+              - generic [ref=e154]:
+                - text: Adam in, Gunnar
+                - generic [ref=e155]: ut (HM)
+                - text: ·
+              - generic [ref=e156]:
+                - text: Jax in, Anton
+                - generic [ref=e157]: ut (A)
+            - generic [ref=e158]:
+              - generic [ref=e159]:
+                - generic [ref=e160]: VB
+                - generic [ref=e161]: Elias
+              - generic [ref=e162]:
+                - generic [ref=e163]: HB
+                - generic [ref=e164]: Bill
+              - generic [ref=e165]:
+                - generic [ref=e166]: VM
+                - generic [ref=e167]: Henry
+              - generic [ref=e168]:
+                - generic [ref=e169]: CM
+                - generic [ref=e170]: Emil
+              - generic [ref=e171]:
+                - generic [ref=e172]: HM
+                - generic [ref=e173]: Adam
+              - generic [ref=e174]:
+                - generic [ref=e175]: A
+                - generic [ref=e176]: Jax
+          - generic [ref=e177]:
+            - generic [ref=e178]:
+              - generic [ref=e179]:
+                - paragraph [ref=e180]: 10-15 min
+                - paragraph [ref=e181]: Spelfönster 3 · byte efter 5 min
+              - paragraph [ref=e182]: "Bänk: Adam, Elias, Jax"
+            - paragraph [ref=e183]:
+              - text: "Byte:"
+              - generic [ref=e184]:
+                - text: Dante in, Elias
+                - generic [ref=e185]: ut (VB)
+                - text: ·
+              - generic [ref=e186]:
+                - text: Anton in, Adam
+                - generic [ref=e187]: ut (HM)
+                - text: ·
+              - generic [ref=e188]:
+                - text: Gunnar in, Jax
+                - generic [ref=e189]: ut (A)
+            - generic [ref=e190]:
+              - generic [ref=e191]:
+                - generic [ref=e192]: VB
+                - generic [ref=e193]: Dante
+              - generic [ref=e194]:
+                - generic [ref=e195]: HB
+                - generic [ref=e196]: Bill
+              - generic [ref=e197]:
+                - generic [ref=e198]: VM
+                - generic [ref=e199]: Henry
+              - generic [ref=e200]:
+                - generic [ref=e201]: CM
+                - generic [ref=e202]: Emil
+              - generic [ref=e203]:
+                - generic [ref=e204]: HM
+                - generic [ref=e205]: Anton
+              - generic [ref=e206]:
+                - generic [ref=e207]: A
+                - generic [ref=e208]: Gunnar
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - generic [ref=e211]:
+                - paragraph [ref=e212]: 15-20 min
+                - paragraph [ref=e213]: Spelfönster 4 · byte efter 5 min
+              - paragraph [ref=e214]: "Bänk: Bill, Emil, Henry"
+            - paragraph [ref=e215]:
+              - text: "Byte:"
+              - generic [ref=e216]:
+                - text: Adam in, Bill
+                - generic [ref=e217]: ut (HB)
+                - text: ·
+              - generic [ref=e218]:
+                - text: Elias in, Henry
+                - generic [ref=e219]: ut (VM)
+                - text: ·
+              - generic [ref=e220]:
+                - text: Jax in, Emil
+                - generic [ref=e221]: ut (CM)
+            - generic [ref=e222]:
+              - generic [ref=e223]:
+                - generic [ref=e224]: VB
+                - generic [ref=e225]: Dante
+              - generic [ref=e226]:
+                - generic [ref=e227]: HB
+                - generic [ref=e228]: Adam
+              - generic [ref=e229]:
+                - generic [ref=e230]: VM
+                - generic [ref=e231]: Elias
+              - generic [ref=e232]:
+                - generic [ref=e233]: CM
+                - generic [ref=e234]: Jax
+              - generic [ref=e235]:
+                - generic [ref=e236]: HM
+                - generic [ref=e237]: Anton
+              - generic [ref=e238]:
+                - generic [ref=e239]: A
+                - generic [ref=e240]: Gunnar
+      - article [ref=e241]:
+        - generic [ref=e242]:
+          - generic [ref=e243]:
+            - paragraph [ref=e244]: Period 2
+            - 'heading "MV: Adam" [level=2] [ref=e245]'
+            - paragraph [ref=e246]: "Formation: 2-3-1"
+          - generic [ref=e247]:
+            - paragraph [ref=e248]: Startbänk
+            - paragraph [ref=e249]: Anton, Dante, Gunnar
+        - generic [ref=e251]:
+          - paragraph [ref=e253]:
+            - text: Dra eller tryck-dra för att byta plats
+            - generic [ref=e254]: Låsta brickor ligger fast
+          - generic [ref=e255]:
+            - button "Lås Elias på A A Elias" [ref=e258] [cursor=pointer]:
+              - button "Lås Elias på A" [ref=e259]: Lås
+              - generic:
+                - paragraph: A
+                - paragraph: Elias
+            - generic [ref=e260]:
+              - button "Lås Bill på VM VM Bill" [ref=e262] [cursor=pointer]:
+                - button "Lås Bill på VM" [ref=e263]: Lås
+                - generic:
+                  - paragraph: VM
+                  - paragraph: Bill
+              - button "Lås Jax på CM CM Jax" [ref=e265] [cursor=pointer]:
+                - button "Lås Jax på CM" [ref=e266]: Lås
+                - generic:
+                  - paragraph: CM
+                  - paragraph: Jax
+              - button "Lås David på HM HM David" [ref=e268] [cursor=pointer]:
+                - button "Lås David på HM" [ref=e269]: Lås
+                - generic:
+                  - paragraph: HM
+                  - paragraph: David
+            - generic [ref=e270]:
+              - button "Lås Emil på VB VB Emil" [ref=e272] [cursor=pointer]:
+                - button "Lås Emil på VB" [ref=e273]: Lås
+                - generic:
+                  - paragraph: VB
+                  - paragraph: Emil
+              - button "Lås Henry på HB HB Henry" [ref=e275] [cursor=pointer]:
+                - button "Lås Henry på HB" [ref=e276]: Lås
+                - generic:
+                  - paragraph: HB
+                  - paragraph: Henry
+            - button "Lås Adam på MV MV Adam" [ref=e279] [cursor=pointer]:
+              - button "Lås Adam på MV" [ref=e280]: Lås
+              - generic:
+                - paragraph: MV
+                - paragraph: Adam
+        - status [ref=e281]
+        - generic [ref=e282]:
+          - generic [ref=e283]:
+            - generic [ref=e284]:
+              - generic [ref=e285]:
+                - paragraph [ref=e286]: 0-5 min
+                - paragraph [ref=e287]: Spelfönster 1 · byte efter 5 min
+              - paragraph [ref=e288]: "Bänk: Anton, Dante, Gunnar"
+            - paragraph [ref=e289]: Startuppställning eller inga byten i detta fönster.
+            - generic [ref=e290]:
+              - generic [ref=e291]:
+                - generic [ref=e292]: VB
+                - generic [ref=e293]: Emil
+              - generic [ref=e294]:
+                - generic [ref=e295]: HB
+                - generic [ref=e296]: Henry
+              - generic [ref=e297]:
+                - generic [ref=e298]: VM
+                - generic [ref=e299]: Bill
+              - generic [ref=e300]:
+                - generic [ref=e301]: CM
+                - generic [ref=e302]: Jax
+              - generic [ref=e303]:
+                - generic [ref=e304]: HM
+                - generic [ref=e305]: David
+              - generic [ref=e306]:
+                - generic [ref=e307]: A
+                - generic [ref=e308]: Elias
+          - generic [ref=e309]:
+            - generic [ref=e310]:
+              - generic [ref=e311]:
+                - paragraph [ref=e312]: 5-10 min
+                - paragraph [ref=e313]: Spelfönster 2 · byte efter 5 min
+              - paragraph [ref=e314]: "Bänk: David, Elias, Jax"
+            - paragraph [ref=e315]:
+              - text: "Byte:"
+              - generic [ref=e316]:
+                - text: Gunnar in, Jax
+                - generic [ref=e317]: ut (CM)
+                - text: ·
+              - generic [ref=e318]:
+                - text: Dante in, David
+                - generic [ref=e319]: ut (HM)
+                - text: ·
+              - generic [ref=e320]:
+                - text: Anton in, Elias
+                - generic [ref=e321]: ut (A)
+            - generic [ref=e322]:
+              - generic [ref=e323]:
+                - generic [ref=e324]: VB
+                - generic [ref=e325]: Emil
+              - generic [ref=e326]:
+                - generic [ref=e327]: HB
+                - generic [ref=e328]: Henry
+              - generic [ref=e329]:
+                - generic [ref=e330]: VM
+                - generic [ref=e331]: Bill
+              - generic [ref=e332]:
+                - generic [ref=e333]: CM
+                - generic [ref=e334]: Gunnar
+              - generic [ref=e335]:
+                - generic [ref=e336]: HM
+                - generic [ref=e337]: Dante
+              - generic [ref=e338]:
+                - generic [ref=e339]: A
+                - generic [ref=e340]: Anton
+          - generic [ref=e341]:
+            - generic [ref=e342]:
+              - generic [ref=e343]:
+                - paragraph [ref=e344]: 10-15 min
+                - paragraph [ref=e345]: Spelfönster 3 · byte efter 5 min
+              - paragraph [ref=e346]: "Bänk: Bill, Emil, Henry"
+            - paragraph [ref=e347]:
+              - text: "Byte:"
+              - generic [ref=e348]:
+                - text: Jax in, Emil
+                - generic [ref=e349]: ut (VB)
+                - text: ·
+              - generic [ref=e350]:
+                - text: David in, Henry
+                - generic [ref=e351]: ut (HB)
+                - text: ·
+              - generic [ref=e352]:
+                - text: Elias in, Bill
+                - generic [ref=e353]: ut (VM)
+            - generic [ref=e354]:
+              - generic [ref=e355]:
+                - generic [ref=e356]: VB
+                - generic [ref=e357]: Jax
+              - generic [ref=e358]:
+                - generic [ref=e359]: HB
+                - generic [ref=e360]: David
+              - generic [ref=e361]:
+                - generic [ref=e362]: VM
+                - generic [ref=e363]: Elias
+              - generic [ref=e364]:
+                - generic [ref=e365]: CM
+                - generic [ref=e366]: Gunnar
+              - generic [ref=e367]:
+                - generic [ref=e368]: HM
+                - generic [ref=e369]: Dante
+              - generic [ref=e370]:
+                - generic [ref=e371]: A
+                - generic [ref=e372]: Anton
+          - generic [ref=e373]:
+            - generic [ref=e374]:
+              - generic [ref=e375]:
+                - paragraph [ref=e376]: 15-20 min
+                - paragraph [ref=e377]: Spelfönster 4 · byte efter 5 min
+              - paragraph [ref=e378]: "Bänk: Dante, David, Gunnar"
+            - paragraph [ref=e379]:
+              - text: "Byte:"
+              - generic [ref=e380]:
+                - text: Bill in, David
+                - generic [ref=e381]: ut (HB)
+                - text: ·
+              - generic [ref=e382]:
+                - text: Henry in, Gunnar
+                - generic [ref=e383]: ut (CM)
+                - text: ·
+              - generic [ref=e384]:
+                - text: Emil in, Dante
+                - generic [ref=e385]: ut (HM)
+            - generic [ref=e386]:
+              - generic [ref=e387]:
+                - generic [ref=e388]: VB
+                - generic [ref=e389]: Jax
+              - generic [ref=e390]:
+                - generic [ref=e391]: HB
+                - generic [ref=e392]: Bill
+              - generic [ref=e393]:
+                - generic [ref=e394]: VM
+                - generic [ref=e395]: Elias
+              - generic [ref=e396]:
+                - generic [ref=e397]: CM
+                - generic [ref=e398]: Henry
+              - generic [ref=e399]:
+                - generic [ref=e400]: HM
+                - generic [ref=e401]: Emil
+              - generic [ref=e402]:
+                - generic [ref=e403]: A
+                - generic [ref=e404]: Anton
+      - article [ref=e405]:
+        - generic [ref=e406]:
+          - generic [ref=e407]:
+            - paragraph [ref=e408]: Period 3
+            - 'heading "MV: Jax" [level=2] [ref=e409]'
+            - paragraph [ref=e410]: "Formation: 2-3-1"
+          - generic [ref=e411]:
+            - paragraph [ref=e412]: Startbänk
+            - paragraph [ref=e413]: Bill, Elias, Henry
+        - generic [ref=e415]:
+          - paragraph [ref=e417]:
+            - text: Dra eller tryck-dra för att byta plats
+            - generic [ref=e418]: Låsta brickor ligger fast
+          - generic [ref=e419]:
+            - button "Lås David på A A David" [ref=e422] [cursor=pointer]:
+              - button "Lås David på A" [ref=e423]: Lås
+              - generic:
+                - paragraph: A
+                - paragraph: David
+            - generic [ref=e424]:
+              - button "Lås Anton på VM VM Anton" [ref=e426] [cursor=pointer]:
+                - button "Lås Anton på VM" [ref=e427]: Lås
+                - generic:
+                  - paragraph: VM
+                  - paragraph: Anton
+              - button "Lås Emil på CM CM Emil" [ref=e429] [cursor=pointer]:
+                - button "Lås Emil på CM" [ref=e430]: Lås
+                - generic:
+                  - paragraph: CM
+                  - paragraph: Emil
+              - button "Lås Adam på HM HM Adam" [ref=e432] [cursor=pointer]:
+                - button "Lås Adam på HM" [ref=e433]: Lås
+                - generic:
+                  - paragraph: HM
+                  - paragraph: Adam
+            - generic [ref=e434]:
+              - button "Lås Gunnar på VB VB Gunnar" [ref=e436] [cursor=pointer]:
+                - button "Lås Gunnar på VB" [ref=e437]: Lås
+                - generic:
+                  - paragraph: VB
+                  - paragraph: Gunnar
+              - button "Lås Dante på HB HB Dante" [ref=e439] [cursor=pointer]:
+                - button "Lås Dante på HB" [ref=e440]: Lås
+                - generic:
+                  - paragraph: HB
+                  - paragraph: Dante
+            - button "Lås Jax på MV MV Jax" [ref=e443] [cursor=pointer]:
+              - button "Lås Jax på MV" [ref=e444]: Lås
+              - generic:
+                - paragraph: MV
+                - paragraph: Jax
+        - status [ref=e445]
+        - generic [ref=e446]:
+          - generic [ref=e447]:
+            - generic [ref=e448]:
+              - generic [ref=e449]:
+                - paragraph [ref=e450]: 0-5 min
+                - paragraph [ref=e451]: Spelfönster 1 · byte efter 5 min
+              - paragraph [ref=e452]: "Bänk: Bill, Elias, Henry"
+            - paragraph [ref=e453]: Startuppställning eller inga byten i detta fönster.
+            - generic [ref=e454]:
+              - generic [ref=e455]:
+                - generic [ref=e456]: VB
+                - generic [ref=e457]: Gunnar
+              - generic [ref=e458]:
+                - generic [ref=e459]: HB
+                - generic [ref=e460]: Dante
+              - generic [ref=e461]:
+                - generic [ref=e462]: VM
+                - generic [ref=e463]: Anton
+              - generic [ref=e464]:
+                - generic [ref=e465]: CM
+                - generic [ref=e466]: Emil
+              - generic [ref=e467]:
+                - generic [ref=e468]: HM
+                - generic [ref=e469]: Adam
+              - generic [ref=e470]:
+                - generic [ref=e471]: A
+                - generic [ref=e472]: David
+          - generic [ref=e473]:
+            - generic [ref=e474]:
+              - generic [ref=e475]:
+                - paragraph [ref=e476]: 5-10 min
+                - paragraph [ref=e477]: Spelfönster 2 · byte efter 5 min
+              - paragraph [ref=e478]: "Bänk: Adam, Anton, David"
+            - paragraph [ref=e479]:
+              - text: "Byte:"
+              - generic [ref=e480]:
+                - text: Bill in, Anton
+                - generic [ref=e481]: ut (VM)
+                - text: ·
+              - generic [ref=e482]:
+                - text: Elias in, Adam
+                - generic [ref=e483]: ut (HM)
+                - text: ·
+              - generic [ref=e484]:
+                - text: Henry in, David
+                - generic [ref=e485]: ut (A)
+            - generic [ref=e486]:
+              - generic [ref=e487]:
+                - generic [ref=e488]: VB
+                - generic [ref=e489]: Gunnar
+              - generic [ref=e490]:
+                - generic [ref=e491]: HB
+                - generic [ref=e492]: Dante
+              - generic [ref=e493]:
+                - generic [ref=e494]: VM
+                - generic [ref=e495]: Bill
+              - generic [ref=e496]:
+                - generic [ref=e497]: CM
+                - generic [ref=e498]: Emil
+              - generic [ref=e499]:
+                - generic [ref=e500]: HM
+                - generic [ref=e501]: Elias
+              - generic [ref=e502]:
+                - generic [ref=e503]: A
+                - generic [ref=e504]: Henry
+          - generic [ref=e505]:
+            - generic [ref=e506]:
+              - generic [ref=e507]:
+                - paragraph [ref=e508]: 10-15 min
+                - paragraph [ref=e509]: Spelfönster 3 · byte efter 5 min
+              - paragraph [ref=e510]: "Bänk: Dante, Emil, Gunnar"
+            - paragraph [ref=e511]:
+              - text: "Byte:"
+              - generic [ref=e512]:
+                - text: Adam in, Gunnar
+                - generic [ref=e513]: ut (VB)
+                - text: ·
+              - generic [ref=e514]:
+                - text: Anton in, Dante
+                - generic [ref=e515]: ut (HB)
+                - text: ·
+              - generic [ref=e516]:
+                - text: David in, Emil
+                - generic [ref=e517]: ut (CM)
+            - generic [ref=e518]:
+              - generic [ref=e519]:
+                - generic [ref=e520]: VB
+                - generic [ref=e521]: Adam
+              - generic [ref=e522]:
+                - generic [ref=e523]: HB
+                - generic [ref=e524]: Anton
+              - generic [ref=e525]:
+                - generic [ref=e526]: VM
+                - generic [ref=e527]: Bill
+              - generic [ref=e528]:
+                - generic [ref=e529]: CM
+                - generic [ref=e530]: David
+              - generic [ref=e531]:
+                - generic [ref=e532]: HM
+                - generic [ref=e533]: Elias
+              - generic [ref=e534]:
+                - generic [ref=e535]: A
+                - generic [ref=e536]: Henry
+          - generic [ref=e537]:
+            - generic [ref=e538]:
+              - generic [ref=e539]:
+                - paragraph [ref=e540]: 15-20 min
+                - paragraph [ref=e541]: Spelfönster 4 · byte efter 5 min
+              - paragraph [ref=e542]: "Bänk: Bill, Elias, Henry"
+            - paragraph [ref=e543]:
+              - text: "Byte:"
+              - generic [ref=e544]:
+                - text: Dante in, Bill
+                - generic [ref=e545]: ut (VM)
+                - text: ·
+              - generic [ref=e546]:
+                - text: Gunnar in, Elias
+                - generic [ref=e547]: ut (HM)
+                - text: ·
+              - generic [ref=e548]:
+                - text: Emil in, Henry
+                - generic [ref=e549]: ut (A)
+            - generic [ref=e550]:
+              - generic [ref=e551]:
+                - generic [ref=e552]: VB
+                - generic [ref=e553]: Adam
+              - generic [ref=e554]:
+                - generic [ref=e555]: HB
+                - generic [ref=e556]: Anton
+              - generic [ref=e557]:
+                - generic [ref=e558]: VM
+                - generic [ref=e559]: Dante
+              - generic [ref=e560]:
+                - generic [ref=e561]: CM
+                - generic [ref=e562]: David
+              - generic [ref=e563]:
+                - generic [ref=e564]: HM
+                - generic [ref=e565]: Gunnar
+              - generic [ref=e566]:
+                - generic [ref=e567]: A
+                - generic [ref=e568]: Emil
+    - generic [ref=e569]:
+      - generic [ref=e571]:
+        - heading "Speltid per spelare" [level=2] [ref=e572]
+        - paragraph [ref=e573]: Dubbelkolla minuter, bänktid och vilka roller varje spelare hann prova. Fäll ut en spelare för detaljer per period och spelfönster.
+      - generic [ref=e574]:
+        - group [ref=e575]:
+          - generic "Adam MV i period 2 45 min Visa detaljer Bänktid 15 min Positioner VB, HB, HM DEF MID" [ref=e576] [cursor=pointer]:
+            - generic [ref=e577]:
+              - generic [ref=e578]:
+                - heading "Adam" [level=3] [ref=e579]
+                - paragraph [ref=e580]: MV i period 2
+              - generic [ref=e581]:
+                - generic [ref=e582]:
+                  - paragraph [ref=e583]: "45"
+                  - paragraph [ref=e584]: min
+                - generic [ref=e585]: Visa detaljer
+            - generic [ref=e586]:
+              - generic [ref=e587]:
+                - term [ref=e588]: Bänktid
+                - definition [ref=e589]: 15 min
+              - generic [ref=e590]:
+                - term [ref=e591]: Positioner
+                - definition [ref=e592]: VB, HB, HM
+            - generic [ref=e593]:
+              - generic [ref=e594]: DEF
+              - generic [ref=e595]: MID
+        - group [ref=e596]:
+          - generic "Anton Ingen målvaktsperiod 45 min Visa detaljer Bänktid 15 min Positioner HB, VM, HM, A DEF MID ATT" [ref=e597] [cursor=pointer]:
+            - generic [ref=e598]:
+              - generic [ref=e599]:
+                - heading "Anton" [level=3] [ref=e600]
+                - paragraph [ref=e601]: Ingen målvaktsperiod
+              - generic [ref=e602]:
+                - generic [ref=e603]:
+                  - paragraph [ref=e604]: "45"
+                  - paragraph [ref=e605]: min
+                - generic [ref=e606]: Visa detaljer
+            - generic [ref=e607]:
+              - generic [ref=e608]:
+                - term [ref=e609]: Bänktid
+                - definition [ref=e610]: 15 min
+              - generic [ref=e611]:
+                - term [ref=e612]: Positioner
+                - definition [ref=e613]: HB, VM, HM, A
+            - generic [ref=e614]:
+              - generic [ref=e615]: DEF
+              - generic [ref=e616]: MID
+              - generic [ref=e617]: ATT
+        - group [ref=e618]:
+          - generic "Bill Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner HB, VM DEF MID" [ref=e619] [cursor=pointer]:
+            - generic [ref=e620]:
+              - generic [ref=e621]:
+                - heading "Bill" [level=3] [ref=e622]
+                - paragraph [ref=e623]: Ingen målvaktsperiod
+              - generic [ref=e624]:
+                - generic [ref=e625]:
+                  - paragraph [ref=e626]: "40"
+                  - paragraph [ref=e627]: min
+                - generic [ref=e628]: Visa detaljer
+            - generic [ref=e629]:
+              - generic [ref=e630]:
+                - term [ref=e631]: Bänktid
+                - definition [ref=e632]: 20 min
+              - generic [ref=e633]:
+                - term [ref=e634]: Positioner
+                - definition [ref=e635]: HB, VM
+            - generic [ref=e636]:
+              - generic [ref=e637]: DEF
+              - generic [ref=e638]: MID
+        - group [ref=e639]:
+          - generic "Dante Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner VB, HB, VM, CM, HM DEF MID" [ref=e640] [cursor=pointer]:
+            - generic [ref=e641]:
+              - generic [ref=e642]:
+                - heading "Dante" [level=3] [ref=e643]
+                - paragraph [ref=e644]: Ingen målvaktsperiod
+              - generic [ref=e645]:
+                - generic [ref=e646]:
+                  - paragraph [ref=e647]: "40"
+                  - paragraph [ref=e648]: min
+                - generic [ref=e649]: Visa detaljer
+            - generic [ref=e650]:
+              - generic [ref=e651]:
+                - term [ref=e652]: Bänktid
+                - definition [ref=e653]: 20 min
+              - generic [ref=e654]:
+                - term [ref=e655]: Positioner
+                - definition [ref=e656]: VB, HB, VM, CM, HM
+            - generic [ref=e657]:
+              - generic [ref=e658]: DEF
+              - generic [ref=e659]: MID
+        - group [ref=e660]:
+          - generic "David MV i period 1 45 min Visa detaljer Bänktid 15 min Positioner HB, CM, HM, A DEF MID ATT" [ref=e661] [cursor=pointer]:
+            - generic [ref=e662]:
+              - generic [ref=e663]:
+                - heading "David" [level=3] [ref=e664]
+                - paragraph [ref=e665]: MV i period 1
+              - generic [ref=e666]:
+                - generic [ref=e667]:
+                  - paragraph [ref=e668]: "45"
+                  - paragraph [ref=e669]: min
+                - generic [ref=e670]: Visa detaljer
+            - generic [ref=e671]:
+              - generic [ref=e672]:
+                - term [ref=e673]: Bänktid
+                - definition [ref=e674]: 15 min
+              - generic [ref=e675]:
+                - term [ref=e676]: Positioner
+                - definition [ref=e677]: HB, CM, HM, A
+            - generic [ref=e678]:
+              - generic [ref=e679]: DEF
+              - generic [ref=e680]: MID
+              - generic [ref=e681]: ATT
+        - group [ref=e682]:
+          - generic "Elias Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner VB, VM, HM, A DEF MID ATT" [ref=e683] [cursor=pointer]:
+            - generic [ref=e684]:
+              - generic [ref=e685]:
+                - heading "Elias" [level=3] [ref=e686]
+                - paragraph [ref=e687]: Ingen målvaktsperiod
+              - generic [ref=e688]:
+                - generic [ref=e689]:
+                  - paragraph [ref=e690]: "40"
+                  - paragraph [ref=e691]: min
+                - generic [ref=e692]: Visa detaljer
+            - generic [ref=e693]:
+              - generic [ref=e694]:
+                - term [ref=e695]: Bänktid
+                - definition [ref=e696]: 20 min
+              - generic [ref=e697]:
+                - term [ref=e698]: Positioner
+                - definition [ref=e699]: VB, VM, HM, A
+            - generic [ref=e700]:
+              - generic [ref=e701]: DEF
+              - generic [ref=e702]: MID
+              - generic [ref=e703]: ATT
+        - group [ref=e704]:
+          - generic "Emil Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner VB, CM, HM, A DEF MID ATT" [ref=e705] [cursor=pointer]:
+            - generic [ref=e706]:
+              - generic [ref=e707]:
+                - heading "Emil" [level=3] [ref=e708]
+                - paragraph [ref=e709]: Ingen målvaktsperiod
+              - generic [ref=e710]:
+                - generic [ref=e711]:
+                  - paragraph [ref=e712]: "40"
+                  - paragraph [ref=e713]: min
+                - generic [ref=e714]: Visa detaljer
+            - generic [ref=e715]:
+              - generic [ref=e716]:
+                - term [ref=e717]: Bänktid
+                - definition [ref=e718]: 20 min
+              - generic [ref=e719]:
+                - term [ref=e720]: Positioner
+                - definition [ref=e721]: VB, CM, HM, A
+            - generic [ref=e722]:
+              - generic [ref=e723]: DEF
+              - generic [ref=e724]: MID
+              - generic [ref=e725]: ATT
+        - group [ref=e726]:
+          - generic "Gunnar Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner VB, CM, HM, A DEF MID ATT" [ref=e727] [cursor=pointer]:
+            - generic [ref=e728]:
+              - generic [ref=e729]:
+                - heading "Gunnar" [level=3] [ref=e730]
+                - paragraph [ref=e731]: Ingen målvaktsperiod
+              - generic [ref=e732]:
+                - generic [ref=e733]:
+                  - paragraph [ref=e734]: "40"
+                  - paragraph [ref=e735]: min
+                - generic [ref=e736]: Visa detaljer
+            - generic [ref=e737]:
+              - generic [ref=e738]:
+                - term [ref=e739]: Bänktid
+                - definition [ref=e740]: 20 min
+              - generic [ref=e741]:
+                - term [ref=e742]: Positioner
+                - definition [ref=e743]: VB, CM, HM, A
+            - generic [ref=e744]:
+              - generic [ref=e745]: DEF
+              - generic [ref=e746]: MID
+              - generic [ref=e747]: ATT
+        - group [ref=e748]:
+          - generic "Henry Ingen målvaktsperiod 40 min Visa detaljer Bänktid 20 min Positioner HB, VM, CM, A DEF MID ATT" [ref=e749] [cursor=pointer]:
+            - generic [ref=e750]:
+              - generic [ref=e751]:
+                - heading "Henry" [level=3] [ref=e752]
+                - paragraph [ref=e753]: Ingen målvaktsperiod
+              - generic [ref=e754]:
+                - generic [ref=e755]:
+                  - paragraph [ref=e756]: "40"
+                  - paragraph [ref=e757]: min
+                - generic [ref=e758]: Visa detaljer
+            - generic [ref=e759]:
+              - generic [ref=e760]:
+                - term [ref=e761]: Bänktid
+                - definition [ref=e762]: 20 min
+              - generic [ref=e763]:
+                - term [ref=e764]: Positioner
+                - definition [ref=e765]: HB, VM, CM, A
+            - generic [ref=e766]:
+              - generic [ref=e767]: DEF
+              - generic [ref=e768]: MID
+              - generic [ref=e769]: ATT
+        - group [ref=e770]:
+          - generic "Jax MV i period 3 45 min Visa detaljer Bänktid 15 min Positioner VB, CM, A DEF MID ATT" [ref=e771] [cursor=pointer]:
+            - generic [ref=e772]:
+              - generic [ref=e773]:
+                - heading "Jax" [level=3] [ref=e774]
+                - paragraph [ref=e775]: MV i period 3
+              - generic [ref=e776]:
+                - generic [ref=e777]:
+                  - paragraph [ref=e778]: "45"
+                  - paragraph [ref=e779]: min
+                - generic [ref=e780]: Visa detaljer
+            - generic [ref=e781]:
+              - generic [ref=e782]:
+                - term [ref=e783]: Bänktid
+                - definition [ref=e784]: 15 min
+              - generic [ref=e785]:
+                - term [ref=e786]: Positioner
+                - definition [ref=e787]: VB, CM, A
+            - generic [ref=e788]:
+              - generic [ref=e789]: DEF
+              - generic [ref=e790]: MID
+              - generic [ref=e791]: ATT
