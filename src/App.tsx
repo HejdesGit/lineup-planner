@@ -30,6 +30,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
+import { Lock, LockOpen } from 'lucide-react'
 import { generateMatchPlan } from './lib/scheduler'
 import {
   GOALKEEPER_SLOT,
@@ -1256,13 +1257,18 @@ function PositionBadgeCard({
             event.stopPropagation()
             onToggleLock()
           }}
-          className={`absolute right-2 top-2 z-10 rounded-full border px-1.5 py-1 font-mono text-[9px] uppercase tracking-[0.18em] ${locked
-            ? 'border-clay-200/50 bg-clay-400/30 text-clay-50'
-            : 'border-white/10 bg-black/20 text-stone-300'
-            }`}
+          className={`absolute right-1.5 top-1.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur sm:right-2 sm:top-2 sm:h-9 sm:w-9 ${
+            locked
+              ? 'border-clay-200/50 bg-clay-400/25 text-clay-50 shadow-[0_0_0_1px_rgba(251,191,36,0.1)]'
+              : 'border-white/10 bg-black/20 text-stone-300 hover:border-white/20 hover:text-white'
+          }`}
           aria-label={locked ? `Lås upp ${player} på ${label}` : `Lås ${player} på ${label}`}
         >
-          {locked ? 'Låst' : 'Lås'}
+          {locked ? (
+            <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          ) : (
+            <LockOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          )}
         </button>
       ) : null}
       <div className="pointer-events-none relative z-[1]">

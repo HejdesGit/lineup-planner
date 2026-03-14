@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
@@ -32,23 +32,28 @@ describe('App', () => {
 
     const lockedButton = screen.getByRole('button', { name: /lås upp henry på vm/i })
     expect(lockedButton).toBeInTheDocument()
-    expect(lockedButton).toHaveTextContent(/låst/i)
+    expect(lockedButton.querySelector('svg')).not.toBeNull()
   })
 
   it('locks manually selected goalkeepers by default', async () => {
     const user = userEvent.setup()
-    render(<App />)
+    const view = render(<App />)
+    const scoped = within(view.container)
 
-    const textarea = screen.getByLabelText(/spelare/i)
+    const textarea = scoped.getAllByRole('textbox')[0] as HTMLTextAreaElement
+    const comboboxes = scoped.getAllByRole('combobox') as HTMLSelectElement[]
+    const goalkeeperPeriod1 = comboboxes[3]
+    const goalkeeperPeriod2 = comboboxes[4]
+    const goalkeeperPeriod3 = comboboxes[5]
     await user.clear(textarea)
     await user.type(textarea, 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo\nIris')
-    await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Ada')
-    await user.selectOptions(screen.getByLabelText(/målvakt period 2/i), 'Bea')
-    await user.selectOptions(screen.getByLabelText(/målvakt period 3/i), 'Cleo')
-    await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
+    await user.selectOptions(goalkeeperPeriod1, 'Ada')
+    await user.selectOptions(goalkeeperPeriod2, 'Bea')
+    await user.selectOptions(goalkeeperPeriod3, 'Cleo')
+    await user.click(scoped.getByRole('button', { name: /generera uppställning/i }))
 
-    expect(await screen.findByRole('button', { name: /lås upp ada på mv/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /lås upp bea på mv/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /lås upp cleo på mv/i })).toBeInTheDocument()
+    expect(await scoped.findByRole('button', { name: /lås upp ada på mv/i })).toBeInTheDocument()
+    expect(scoped.getByRole('button', { name: /lås upp bea på mv/i })).toBeInTheDocument()
+    expect(scoped.getByRole('button', { name: /lås upp cleo på mv/i })).toBeInTheDocument()
   })
 })
