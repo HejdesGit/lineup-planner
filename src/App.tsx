@@ -5,6 +5,7 @@ import {
   type ReactNode,
   useMemo,
   useReducer,
+  useRef,
   useState,
   useTransition,
 } from 'react'
@@ -17,16 +18,17 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type CollisionDetection,
+  type DragOverEvent,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
-  rectSortingStrategy,
+  rectSwappingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { generateMatchPlan } from './lib/scheduler'
 import {
   FORMATION_PRESETS,
@@ -596,9 +598,20 @@ function PeriodCard({
   )
   const [lockedSlots, setLockedSlots] = useState<BoardSlotId[]>([])
   const [activeSlot, setActiveSlot] = useState<BoardSlotId | null>(null)
+  const [overSlot, setOverSlot] = useState<BoardSlotId | null>(null)
   const displayLineup = getBoardLineup(boardAssignments, period.positions)
   const displayGoalkeeperId = boardAssignments[GOALKEEPER_SLOT]
   const displayGoalkeeperName = nameById[displayGoalkeeperId] ?? period.goalkeeperName
+  const previewAssignments = useMemo(
+    () =>
+      activeSlot && overSlot && activeSlot !== overSlot
+        ? swapBoardAssignments(boardAssignments, activeSlot, overSlot)
+        : boardAssignments,
+    [activeSlot, boardAssignments, overSlot],
+  )
+  const previewLineup = getBoardLineup(previewAssignments, period.positions)
+  const previewGoalkeeperId = previewAssignments[GOALKEEPER_SLOT]
+  const activePlayerName = activeSlot ? boardAssignments[activeSlot] : null
 
   const handleToggleLock = (slotId: BoardSlotId) => {
     setLockedSlots((current) =>
@@ -642,15 +655,21 @@ function PeriodCard({
 
       <FormationBoard
         formation={period.formation}
-        lineup={displayLineup}
-        goalkeeperId={displayGoalkeeperId}
+        lineup={previewLineup}
+        goalkeeperId={previewGoalkeeperId}
         nameById={nameById}
         lockedSlots={lockedSlots}
         onToggleLock={handleToggleLock}
         onSwapSlots={handleSwapSlots}
         activeSlot={activeSlot}
+        overSlot={overSlot}
+        activePlayerName={activePlayerName ? nameById[activePlayerName] ?? null : null}
         onDragStart={setActiveSlot}
-        onDragEnd={() => setActiveSlot(null)}
+        onDragOver={setOverSlot}
+        onDragEnd={() => {
+          setActiveSlot(null)
+          setOverSlot(null)
+        }}
       />
 
       <div className="mt-4 space-y-3 sm:mt-5">
@@ -729,7 +748,10 @@ function FormationBoard({
   onToggleLock,
   onSwapSlots,
   activeSlot,
+  overSlot,
+  activePlayerName,
   onDragStart,
+  onDragOver,
   onDragEnd,
 }: {
   formation: FormationKey
@@ -740,9 +762,48 @@ function FormationBoard({
   onToggleLock: (slotId: BoardSlotId) => void
   onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
   activeSlot: BoardSlotId | null
+  overSlot: BoardSlotId | null
+  activePlayerName: string | null
   onDragStart: (slotId: BoardSlotId | null) => void
+  onDragOver: (slotId: BoardSlotId | null) => void
   onDragEnd: () => void
 }) {
+  const hoveredSlotRef = useRef<BoardSlotId | null>(null)
+  const slotCollisionDetection = useMemo<CollisionDetection>(
+    () => (args) => {
+      const pointerX = args.pointerCoordinates?.x
+      const pointerY = args.pointerCoordinates?.y
+
+      if (typeof pointerX === 'number' && typeof pointerY === 'number') {
+        const directHit = args.droppableContainers.find((container) => {
+          const rect = args.droppableRects.get(container.id)
+
+          if (!rect) {
+            return false
+          }
+
+          return (
+            pointerX >= rect.left &&
+            pointerX <= rect.left + rect.width &&
+            pointerY >= rect.top &&
+            pointerY <= rect.top + rect.height
+          )
+        })
+
+        if (directHit) {
+          return [
+            {
+              id: directHit.id,
+              data: { droppableContainer: directHit, value: 1 },
+            },
+          ]
+        }
+      }
+
+      return closestCenter(args)
+    },
+    [],
+  )
   const slotOrder = useMemo<BoardSlotId[]>(
     () => [...FORMATION_PRESETS[formation].positions, GOALKEEPER_SLOT],
     [formation],
@@ -758,27 +819,46 @@ function FormationBoard({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   )
-  const activePlayer = activeSlot ? readBoardSlotPlayerName(activeSlot, lineup, goalkeeperId, nameById) : null
+  const activePlayer = activePlayerName
   const activeTone = activeSlot ? getBoardSlotTone(activeSlot) : null
 
+  const syncHoveredSlot = (slotId: BoardSlotId | null) => {
+    hoveredSlotRef.current = slotId
+    onDragOver(slotId)
+  }
+
   const handleDragStart = (event: DragStartEvent) => {
+    hoveredSlotRef.current = null
     onDragStart(event.active.id as BoardSlotId)
+  }
+
+  const handleDragOver = (event: DragOverEvent) => {
+    syncHoveredSlot(event.over ? (event.over.id as BoardSlotId) : null)
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
+    const targetSlot = hoveredSlotRef.current ?? (over ? (over.id as BoardSlotId) : null)
+    hoveredSlotRef.current = null
     onDragEnd()
 
-    if (!over || active.id === over.id) {
+    if (!targetSlot || active.id === targetSlot) {
       return
     }
 
-    onSwapSlots(active.id as BoardSlotId, over.id as BoardSlotId)
+    onSwapSlots(active.id as BoardSlotId, targetSlot)
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={onDragEnd}>
-      <SortableContext items={slotOrder} strategy={rectSortingStrategy}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={slotCollisionDetection}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+      onDragCancel={onDragEnd}
+    >
+      <SortableContext items={slotOrder} strategy={rectSwappingStrategy}>
         <div className="rounded-[1.35rem] border border-pitch-300/20 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.24),_transparent_34%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-2.5 sm:rounded-[1.75rem] sm:p-4">
           <div className="rounded-[1.2rem] border border-white/10 border-dashed p-3 sm:rounded-[1.5rem] sm:p-4">
             <div className="mb-3 flex justify-end">
@@ -798,8 +878,17 @@ function FormationBoard({
                       player={readLineupPlayer(lineup, position, nameById)}
                       tone={getPositionTone(position)}
                       locked={lockedSlots.includes(position)}
-                      isActive={activeSlot === position}
+                      isActive={activeSlot === position || overSlot === position}
                       onToggleLock={onToggleLock}
+                      onHoverSlot={
+                        activeSlot
+                          ? (slotId) => {
+                              if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
+                                syncHoveredSlot(slotId)
+                              }
+                            }
+                          : undefined
+                      }
                     />
                   ))}
                 </FormationRow>
@@ -811,8 +900,17 @@ function FormationBoard({
                   player={nameById[goalkeeperId] ?? '-'}
                   tone="gk"
                   locked={lockedSlots.includes(GOALKEEPER_SLOT)}
-                  isActive={activeSlot === GOALKEEPER_SLOT}
+                  isActive={activeSlot === GOALKEEPER_SLOT || overSlot === GOALKEEPER_SLOT}
                   onToggleLock={onToggleLock}
+                  onHoverSlot={
+                    activeSlot
+                      ? (slotId) => {
+                          if (slotId !== activeSlot && !lockedSlots.includes(slotId)) {
+                            syncHoveredSlot(slotId)
+                          }
+                        }
+                      : undefined
+                  }
                 />
               </div>
             </div>
@@ -912,6 +1010,7 @@ function PositionBadge({
   locked,
   isActive,
   onToggleLock,
+  onHoverSlot,
 }: {
   slotId: BoardSlotId
   label: string
@@ -920,26 +1019,29 @@ function PositionBadge({
   locked: boolean
   isActive: boolean
   onToggleLock: (slotId: BoardSlotId) => void
+  onHoverSlot?: (slotId: BoardSlotId) => void
 }) {
   const {
     attributes,
     listeners,
     setNodeRef,
-    transform,
-    transition,
     isDragging,
   } = useSortable({
     id: slotId,
     disabled: locked,
   })
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  }
-
   return (
-    <div ref={setNodeRef} style={style} className={isDragging ? 'z-20' : undefined}>
+    <div
+      ref={setNodeRef}
+      className={isDragging ? 'z-20' : undefined}
+      onPointerEnter={() => {
+        onHoverSlot?.(slotId)
+      }}
+      onPointerMove={() => {
+        onHoverSlot?.(slotId)
+      }}
+    >
       <PositionBadgeCard
         label={label}
         player={player}
@@ -1110,14 +1212,16 @@ function getBoardLineup(
   ) as Lineup
 }
 
-function readBoardSlotPlayerName(
-  slotId: BoardSlotId,
-  lineup: Lineup,
-  goalkeeperId: string,
-  nameById: Record<string, string>,
+function swapBoardAssignments(
+  boardAssignments: Record<BoardSlotId, string>,
+  sourceSlot: BoardSlotId,
+  targetSlot: BoardSlotId,
 ) {
-  const playerId = slotId === GOALKEEPER_SLOT ? goalkeeperId : lineup[slotId]
-  return playerId ? nameById[playerId] ?? '-' : '-'
+  return {
+    ...boardAssignments,
+    [sourceSlot]: boardAssignments[targetSlot],
+    [targetSlot]: boardAssignments[sourceSlot],
+  }
 }
 
 function normalizePlayers(input: string): Player[] {
