@@ -1151,9 +1151,9 @@ function PositionBadgeCard({
         isOverlay
           ? 'scale-[1.02] shadow-2xl opacity-95'
           : dragState === 'source'
-            ? 'opacity-0'
+            ? 'scale-[0.97] opacity-70 ring-2 ring-clay-200/30 shadow-[0_0_0_1px_rgba(251,191,36,0.12)]'
             : dragState === 'target'
-              ? 'ring-1 ring-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+              ? 'ring-2 ring-emerald-300/45 shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_0_28px_rgba(16,185,129,0.12)]'
               : ''
       }`}
       {...dragHandleProps}
