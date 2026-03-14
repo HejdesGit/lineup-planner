@@ -27,6 +27,7 @@ export type FormationKey = keyof typeof FORMATION_PRESETS
 export type OutfieldPosition = (typeof ALL_POSITIONS)[number]
 export type RoleGroup = (typeof ROLE_GROUPS)[OutfieldPosition]
 export type Lineup = Partial<Record<OutfieldPosition, string>>
+export type GoalkeeperSelections = [string, string, string]
 
 export interface ChunkSubstitution {
   playerInId: string
@@ -97,4 +98,14 @@ export interface MatchPlan {
   targets: Record<string, number>
   periods: PeriodPlan[]
   summaries: PlayerSummary[]
+}
+
+export interface GeneratedConfig {
+  playerInput: string
+  playerNames: string[]
+  periodMinutes: 15 | 20
+  formation: FormationKey
+  chunkMinutes: number
+  goalkeeperSelections: GoalkeeperSelections
+  seed: number
 }

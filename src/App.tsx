@@ -3,6 +3,7 @@ import {
   type Dispatch,
   type HTMLAttributes,
   type ReactNode,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -35,17 +36,28 @@ import { generateMatchPlan } from './lib/scheduler'
 import {
   GOALKEEPER_SLOT,
   applyPeriodOverrides,
+  areBoardAssignmentsEqual,
   createBoardAssignments,
   getBoardBenchSlots,
   getBoardLineup,
   isBenchSlot,
+  normalizePeriodOverrides,
   swapBoardAssignments,
   type BoardSlotId,
   type PeriodBoardOverrides,
 } from './lib/planOverrides'
 import {
+  buildLineupShareUrl,
+  clearLineupShareUrl,
+  decodeLineupSnapshot,
+  encodeLineupSnapshot,
+  LINEUP_SHARE_QUERY_PARAM,
+} from './lib/share'
+import {
   FORMATION_PRESETS,
   type FormationKey,
+  type GeneratedConfig,
+  type GoalkeeperSelections,
   type Lineup,
   type MatchPlan,
   type OutfieldPosition,
@@ -91,13 +103,15 @@ const DEFAULT_NAMES = BASE_PLAYER_POOL.slice(0, 10)
 const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 10
+const DEFAULT_SHARE_SEED = 20260314
+const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
 
 interface FormState {
   playerInput: string
   periodMinutes: 15 | 20
   formation: FormationKey
   chunkMinutes: number
-  goalkeeperSelections: [string, string, string]
+  goalkeeperSelections: GoalkeeperSelections
   errors: string[]
 }
 
@@ -119,6 +133,14 @@ const INITIAL_FORM_STATE: FormState = {
   errors: [],
 }
 
+interface InitialAppState {
+  formState: FormState
+  generatedConfig: GeneratedConfig
+  plan: MatchPlan | null
+  periodOverrides: PeriodBoardOverrides
+  shouldSyncShareUrl: boolean
+}
+
 function formReducer(state: FormState, action: FormAction): FormState {
   switch (action.type) {
     case 'setPlayerInput':
@@ -134,7 +156,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
         ...state,
         goalkeeperSelections: state.goalkeeperSelections.map((selection, index) =>
           index === action.periodIndex ? action.value : selection,
-        ) as [string, string, string],
+        ) as GoalkeeperSelections,
       }
     case 'setErrors':
       return { ...state, errors: action.value }
@@ -146,56 +168,98 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 function App() {
-  const [formState, dispatch] = useReducer(formReducer, INITIAL_FORM_STATE)
+  const initialStateRef = useRef<InitialAppState | null>(null)
+
+  if (!initialStateRef.current) {
+    initialStateRef.current = createInitialAppState()
+  }
+
+  const initialState = initialStateRef.current
+  const [formState, dispatch] = useReducer(formReducer, initialState.formState)
   const [isPending, startTransition] = useTransition()
-  const [plan, setPlan] = useState<MatchPlan | null>(() => {
-    const initialPlayers = normalizePlayers(DEFAULT_PLAYER_INPUT)
-    return generateMatchPlan({
-      players: initialPlayers,
-      periodMinutes: 20,
-      formation: DEFAULT_FORMATION,
-      chunkMinutes: DEFAULT_CHUNK_MINUTES,
-      lockedGoalkeeperIds: [null, null, null],
-      seed: 20260314,
-    })
-  })
-  const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>({})
+  const [generatedConfig, setGeneratedConfig] = useState(initialState.generatedConfig)
+  const [plan, setPlan] = useState<MatchPlan | null>(initialState.plan)
+  const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
+  const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
 
   const playerOptions = useMemo(() => getPlayerOptions(formState.playerInput), [formState.playerInput])
-  const displayPlan = useMemo(
-    () => (plan ? applyPeriodOverrides(plan, periodOverrides) : null),
+  const normalizedOverrides = useMemo(
+    () => (plan ? normalizePeriodOverrides(plan, periodOverrides) : {}),
     [periodOverrides, plan],
+  )
+  const displayPlan = useMemo(
+    () => (plan ? applyPeriodOverrides(plan, normalizedOverrides) : null),
+    [normalizedOverrides, plan],
   )
 
   const playerNameById = displayPlan
     ? Object.fromEntries(displayPlan.summaries.map((summary) => [summary.playerId, summary.name]))
     : {}
 
+  useEffect(() => {
+    if (!plan || !shouldSyncShareUrl) {
+      return
+    }
+
+    const nextUrl = createLineupShareUrl(generatedConfig, normalizedOverrides)
+
+    if (window.location.href !== nextUrl) {
+      window.history.replaceState(null, '', nextUrl)
+    }
+  }, [generatedConfig, normalizedOverrides, plan, shouldSyncShareUrl])
+
   const handleGenerate = () => {
     try {
       const players = normalizePlayers(formState.playerInput)
-      const seed = Date.now()
       const nextPlan = generateMatchPlan({
         players,
         periodMinutes: formState.periodMinutes,
         formation: formState.formation,
         chunkMinutes: formState.chunkMinutes,
         lockedGoalkeeperIds: mapGoalkeeperSelectionsToIds(players, formState.goalkeeperSelections),
-        seed,
+        seed: Date.now(),
+      })
+      const nextGeneratedConfig = buildGeneratedConfig({
+        players,
+        playerInput: formState.playerInput,
+        periodMinutes: formState.periodMinutes,
+        formation: formState.formation,
+        chunkMinutes: formState.chunkMinutes,
+        goalkeeperSelections: formState.goalkeeperSelections,
+        seed: nextPlan.seed,
       })
       dispatch({ type: 'clearErrors' })
       startTransition(() => {
+        setGeneratedConfig(nextGeneratedConfig)
         setPlan(nextPlan)
         setPeriodOverrides({})
+        setShouldSyncShareUrl(true)
       })
     } catch (error) {
       dispatch({
         type: 'setErrors',
         value: [error instanceof Error ? error.message : 'Något gick fel vid generering.'],
       })
+      window.history.replaceState(null, '', clearLineupShareUrl(window.location.href))
       setPlan(null)
       setPeriodOverrides({})
+      setShouldSyncShareUrl(false)
     }
+  }
+
+  const handleShareViaWhatsApp = () => {
+    if (!plan) {
+      return
+    }
+
+    const shareUrl = createLineupShareUrl(generatedConfig, normalizedOverrides)
+    window.history.replaceState(null, '', shareUrl)
+    setShouldSyncShareUrl(true)
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(`Uppställning EIK:\n${shareUrl}`)}`,
+      '_blank',
+      'noopener,noreferrer',
+    )
   }
 
   return (
@@ -208,7 +272,9 @@ function App() {
             dispatch={dispatch}
             playerOptions={playerOptions}
             isPending={isPending}
+            canShare={Boolean(plan)}
             onGenerate={handleGenerate}
+            onShareViaWhatsApp={handleShareViaWhatsApp}
           />
         </header>
 
@@ -221,15 +287,18 @@ function App() {
                 <PeriodCard
                   key={`${displayPlan.seed}-${period.period}`}
                   period={period}
-                  boardAssignments={periodOverrides[period.period] ?? createBoardAssignments(plan.periods[index])}
+                  boardAssignments={
+                    normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
+                  }
                   nameById={playerNameById}
                   defaultLockedSlots={
                     displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
                   }
                   onSwapSlots={(sourceSlot, targetSlot) => {
+                    setShouldSyncShareUrl(true)
                     setPeriodOverrides((current) => {
                       const currentAssignments =
-                        current[period.period] ?? createBoardAssignments(plan.periods[index])
+                        normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
 
                       return {
                         ...current,
@@ -281,13 +350,17 @@ function SettingsPanel({
   dispatch,
   playerOptions,
   isPending,
+  canShare,
   onGenerate,
+  onShareViaWhatsApp,
 }: {
   state: FormState
   dispatch: Dispatch<FormAction>
   playerOptions: string[]
   isPending: boolean
+  canShare: boolean
   onGenerate: () => void
+  onShareViaWhatsApp: () => void
 }) {
   return (
     <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
@@ -430,14 +503,24 @@ function SettingsPanel({
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={isPending}
-          className="inline-flex h-12 w-full items-center justify-center rounded-full bg-clay-400 px-6 font-display text-lg font-bold text-clay-900 transition hover:bg-clay-300 disabled:cursor-wait disabled:opacity-70 sm:w-auto"
-        >
-          {isPending ? 'Genererar...' : 'Generera uppställning'}
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={isPending}
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-clay-400 px-6 font-display text-lg font-bold text-clay-900 transition hover:bg-clay-300 disabled:cursor-wait disabled:opacity-70 sm:w-auto"
+          >
+            {isPending ? 'Genererar...' : 'Generera uppställning'}
+          </button>
+          <button
+            type="button"
+            onClick={onShareViaWhatsApp}
+            disabled={!canShare}
+            className="inline-flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-white/5 px-6 font-display text-lg font-bold text-white transition hover:border-clay-300/40 hover:bg-clay-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+          >
+            Dela via WhatsApp
+          </button>
+        </div>
 
         {state.errors.length > 0 ? (
           <div className="rounded-[1.25rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
@@ -1344,6 +1427,199 @@ function buildPlayerDetail(
   }
 }
 
+function createInitialAppState(): InitialAppState {
+  const defaultState = createDefaultAppState()
+
+  if (typeof window === 'undefined') {
+    return defaultState
+  }
+
+  const sharedValue = new URL(window.location.href).searchParams.get(LINEUP_SHARE_QUERY_PARAM)
+
+  if (!sharedValue) {
+    return defaultState
+  }
+
+  try {
+    const { config, overrides } = decodeLineupSnapshot(sharedValue)
+    const hydratedPlan = buildPlanFromGeneratedConfig(config, true)
+    const hydratedOverrides = validateSharedOverrides(hydratedPlan, overrides)
+
+    return {
+      formState: createFormStateFromConfig(config),
+      generatedConfig: config,
+      plan: hydratedPlan,
+      periodOverrides: hydratedOverrides,
+      shouldSyncShareUrl: true,
+    }
+  } catch {
+    window.history.replaceState(null, '', clearLineupShareUrl(window.location.href))
+
+    return {
+      ...defaultState,
+      formState: {
+        ...defaultState.formState,
+        errors: [SHARE_LINK_ERROR_MESSAGE],
+      },
+    }
+  }
+}
+
+function createDefaultAppState(): InitialAppState {
+  const playerInput = INITIAL_FORM_STATE.playerInput
+  const players = normalizePlayers(playerInput)
+  const initialGoalkeeperSelections = [...INITIAL_FORM_STATE.goalkeeperSelections] as GoalkeeperSelections
+  const initialPlan = generateMatchPlan({
+    players,
+    periodMinutes: INITIAL_FORM_STATE.periodMinutes,
+    formation: INITIAL_FORM_STATE.formation,
+    chunkMinutes: INITIAL_FORM_STATE.chunkMinutes,
+    lockedGoalkeeperIds: [null, null, null],
+    seed: DEFAULT_SHARE_SEED,
+  })
+  const generatedConfig = buildGeneratedConfig({
+    players,
+    playerInput,
+    periodMinutes: INITIAL_FORM_STATE.periodMinutes,
+    formation: INITIAL_FORM_STATE.formation,
+    chunkMinutes: INITIAL_FORM_STATE.chunkMinutes,
+    goalkeeperSelections: initialGoalkeeperSelections,
+    seed: initialPlan.seed,
+  })
+
+  return {
+    formState: createFormStateFromConfig(generatedConfig),
+    generatedConfig,
+    plan: initialPlan,
+    periodOverrides: {},
+    shouldSyncShareUrl: false,
+  }
+}
+
+function createFormStateFromConfig(config: GeneratedConfig): FormState {
+  return {
+    playerInput: config.playerInput,
+    periodMinutes: config.periodMinutes,
+    formation: config.formation,
+    chunkMinutes: config.chunkMinutes,
+    goalkeeperSelections: [...config.goalkeeperSelections] as GoalkeeperSelections,
+    errors: [],
+  }
+}
+
+function buildGeneratedConfig({
+  players,
+  playerInput,
+  periodMinutes,
+  formation,
+  chunkMinutes,
+  goalkeeperSelections,
+  seed,
+}: {
+  players: Player[]
+  playerInput: string
+  periodMinutes: 15 | 20
+  formation: FormationKey
+  chunkMinutes: number
+  goalkeeperSelections: GoalkeeperSelections
+  seed: number
+}): GeneratedConfig {
+  return {
+    playerInput,
+    playerNames: players.map((player) => player.name),
+    periodMinutes,
+    formation,
+    chunkMinutes,
+    goalkeeperSelections: [...goalkeeperSelections] as GoalkeeperSelections,
+    seed,
+  }
+}
+
+function buildPlanFromGeneratedConfig(config: GeneratedConfig, exactSeed = false) {
+  const players = normalizePlayers(config.playerInput)
+
+  return generateMatchPlan({
+    players,
+    periodMinutes: config.periodMinutes,
+    formation: config.formation,
+    chunkMinutes: config.chunkMinutes,
+    lockedGoalkeeperIds: mapGoalkeeperSelectionsToIds(players, config.goalkeeperSelections),
+    seed: config.seed,
+    ...(exactSeed ? { attempts: 1 } : {}),
+  })
+}
+
+function createLineupShareUrl(
+  config: GeneratedConfig,
+  overrides: PeriodBoardOverrides,
+) {
+  const encodedSnapshot = encodeLineupSnapshot({
+    config,
+    overrides: serializePeriodOverrides(overrides),
+  })
+
+  return buildLineupShareUrl(encodedSnapshot, window.location.href)
+}
+
+function serializePeriodOverrides(overrides: PeriodBoardOverrides) {
+  const serializedOverrides: Record<string, Record<string, string>> = {}
+
+  for (const [period, assignments] of Object.entries(overrides)) {
+    if (assignments) {
+      serializedOverrides[period] = assignments
+    }
+  }
+
+  return serializedOverrides
+}
+
+function validateSharedOverrides(
+  plan: MatchPlan,
+  sharedOverrides: Record<string, Record<string, string>>,
+): PeriodBoardOverrides {
+  const validatedOverrides: PeriodBoardOverrides = {}
+
+  for (const [periodKey, assignments] of Object.entries(sharedOverrides)) {
+    const periodNumber = Number(periodKey)
+    const period = plan.periods.find((candidate) => candidate.period === periodNumber)
+
+    if (!period) {
+      throw new Error('Ogiltig delningslänk.')
+    }
+
+    const defaultAssignments = createBoardAssignments(period)
+    const expectedSlots = Object.keys(defaultAssignments).sort()
+    const receivedSlots = Object.keys(assignments).sort()
+
+    if (
+      expectedSlots.length !== receivedSlots.length ||
+      !expectedSlots.every((slotId, index) => slotId === receivedSlots[index])
+    ) {
+      throw new Error('Ogiltig delningslänk.')
+    }
+
+    const expectedPlayers = Object.values(defaultAssignments).sort()
+    const receivedPlayers = Object.values(assignments).sort()
+
+    if (
+      expectedPlayers.length !== receivedPlayers.length ||
+      !expectedPlayers.every((playerId, index) => playerId === receivedPlayers[index])
+    ) {
+      throw new Error('Ogiltig delningslänk.')
+    }
+
+    const nextAssignments = Object.fromEntries(
+      expectedSlots.map((slotId) => [slotId, assignments[slotId]]),
+    ) as Record<BoardSlotId, string>
+
+    if (!areBoardAssignmentsEqual(nextAssignments, defaultAssignments)) {
+      validatedOverrides[periodNumber] = nextAssignments
+    }
+  }
+
+  return validatedOverrides
+}
+
 function normalizePlayers(input: string): Player[] {
   const names = parseNames(input)
 
@@ -1390,7 +1666,7 @@ function shuffle<T>(items: T[]) {
   return items
 }
 
-function mapGoalkeeperSelectionsToIds(players: Player[], selections: [string, string, string]) {
+function mapGoalkeeperSelectionsToIds(players: Player[], selections: GoalkeeperSelections) {
   const playerIdByName = new Map(
     players.map((player) => [player.name.toLocaleLowerCase('sv-SE'), player.id]),
   )

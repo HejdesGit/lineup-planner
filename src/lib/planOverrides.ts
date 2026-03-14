@@ -47,6 +47,26 @@ export function swapBoardAssignments(
   }
 }
 
+export function areBoardAssignmentsEqual(
+  left: Partial<Record<BoardSlotId, string>>,
+  right: Partial<Record<BoardSlotId, string>>,
+) {
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) {
+      return false
+    }
+
+    return left[key as BoardSlotId] === right[key as BoardSlotId]
+  })
+}
+
 export function getBenchSlotId(index: number): BenchSlotId {
   return `${BENCH_SLOT_PREFIX}${index + 1}` as BenchSlotId
 }
@@ -99,6 +119,29 @@ function collectPeriodPlayerIds(period: PeriodPlan) {
   }
 
   return ordered
+}
+
+export function normalizePeriodOverrides(
+  plan: MatchPlan,
+  overrides: PeriodBoardOverrides,
+): PeriodBoardOverrides {
+  const normalized: PeriodBoardOverrides = {}
+
+  for (const period of plan.periods) {
+    const overrideAssignments = overrides[period.period]
+
+    if (!overrideAssignments) {
+      continue
+    }
+
+    const defaultAssignments = createBoardAssignments(period)
+
+    if (!areBoardAssignmentsEqual(overrideAssignments, defaultAssignments)) {
+      normalized[period.period] = overrideAssignments
+    }
+  }
+
+  return normalized
 }
 
 export function applyPeriodOverrides(
