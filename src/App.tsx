@@ -87,7 +87,7 @@ const BASE_PLAYER_POOL = [
 const DEFAULT_NAMES = BASE_PLAYER_POOL.slice(0, 10)
 const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
-const DEFAULT_CHUNK_MINUTES = 5
+const DEFAULT_CHUNK_MINUTES = 10
 
 interface FormState {
   playerInput: string
