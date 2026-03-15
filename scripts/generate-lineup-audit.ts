@@ -298,18 +298,36 @@ function summarizeDimensionBucket(recordsWithContext: RecordWithContext[]): Dime
 function buildAiReviewPrompt() {
   return `# AI Review Prompt
 
-Du granskar exporten i \`docs/generated-lineups\`.
+Du granskar exportdata i \`docs/generated-lineups\`. Fokusera på resultaten i exporten, inte på implementationskoden.
+
+## Mål
+- Bedöm om viktningen och normalized scoring verkar robusta och rimliga över hela exporten.
+- Hitta tydliga fel, återkommande fairnessproblem och omotiverade skillnader mellan \`legacy\` och \`normalized\`.
 
 ## Arbetsordning
-1. Börja med \`summary.json\` och identifiera dimensioner eller scenarion med många flaggor, stor minutspridning eller återkommande valideringsfel.
-2. Öppna \`index.json\` för att hitta relevanta scenario-mappar.
-3. Läs \`scenarios/<scenario-id>/manifest.json\` och därefter en eller flera \`seed-<seed>.json\` för de scenarion som ser mest extrema ut.
+1. Börja med \`summary.json\` och notera dimensioner som sticker ut genom:
+   - \`flaggedExportCount > 0\`
+   - \`validationFailureCount > 0\`
+   - icke-tomma \`uniqueFlags\`
+   - hög \`maxMinuteSpread\` eller \`maxBenchSpread\`
+2. Öppna \`index.json\` och välj en fast granskningsmatris:
+   - 2 extrema scenarion med flest flaggade seeds, högst spreads eller tydligast avvikande aggregate-värden
+   - 2 mer typiska eller medianlika scenarion utan flaggor eller valideringsfel
+   - 2 kohortjämförelser där du håller så mycket som möjligt konstant men byter en dimension, till exempel formation, spelarantal eller antal byten
+3. För varje valt scenario, läs \`scenarios/<scenario-id>/manifest.json\` och minst 2 \`seed-<seed>.json\`:
+   - ett seed som verkar värst eller mest extremt
+   - ett seed som verkar mer typiskt för samma scenario
+4. Verifiera alltid mot scenarioets \`config\` i \`index.json\` eller \`manifest.json\`, inte bara mot scenario-id:t.
 
-## Vad du ska bedöma
-- Om genereringarna verkar korrekta enligt spelform, speltid, bänktid och målvaktslåsning.
-- Om normalized scoring verkar välja rimliga planer mellan olika spelarantal, formationer och bytesmönster.
-- Om legacy och normalized pekar på tydliga skillnader som verkar motiverade.
-- Om det finns återkommande fairnessproblem, smal rotationsbredd eller dåligt viktad speltid.
+## Bedömningsregler
+- Alla \`validationFailureCount > 0\` eller misslyckade \`validations\` är kritiska fynd.
+- Alla icke-tomma \`flags\` är värdiga att kommentera, även om valideringarna passerar.
+- Scenarion som ligger på eller nära högsta observerade \`totalMinuteSpread\` eller \`benchMinuteSpread\` ska granskas som hög prioritet.
+- Bedöm korrekthet mot spelform, total speltid, bänktid, rotationsbredd och målvaktslåsning i scenarioets config.
+- Jämför \`normalized\` mot \`legacy\` så här:
+  - önskat: \`normalized\` minskar minutspridning, bänkspridning eller flaggor utan att skapa nya regelbrott
+  - neutralt: skillnaderna är små och ger ingen tydlig effekt på fairness eller rotationsbredd
+  - varningsflagga: \`normalized\` ökar spridning, skapar smalare rotation, ger sämre bänkfördelning eller introducerar nya flaggor
 
 ## Viktiga fält
 - \`scoreBreakdown.normalized\`
@@ -319,12 +337,21 @@ Du granskar exporten i \`docs/generated-lineups\`.
 - \`derivedMetrics.playerMetrics\`
 - \`validations\`
 - \`flags\`
+- \`aggregate.flaggedSeedCount\`
+- \`aggregate.maxMinuteSpread\`
+- \`aggregate.maxBenchSpread\`
+- \`config.playerCount\`
+- \`config.periodMinutes\`
+- \`config.formation\`
+- \`config.substitutionsPerPeriod\`
+- \`config.goalkeeperMode\`
 
 ## Önskat svar
-1. En kort slutsats om viktningen verkar rimlig eller inte.
-2. De tydligaste problemen, med scenario-id och seed.
-3. Vad som ser stabilt ut över många scenarion.
+1. En kort slutsats om viktningen verkar rimlig, delvis rimlig eller inte rimlig.
+2. De tydligaste problemen, alltid med scenario-id, seed och konkreta evidensvärden.
+3. Vad som ser stabilt ut över många scenarion eller kohorter.
 4. Konkreta förslag på vilka penalties eller vikter som bör justeras, och varför.
+5. Om inga tydliga problem hittas, säg det explicit och namnge vilka kontroller som passerade.
 `
 }
 
