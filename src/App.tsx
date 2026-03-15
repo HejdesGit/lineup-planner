@@ -126,7 +126,7 @@ const BASE_PLAYER_POOL = [
 const DEFAULT_NAMES = BASE_PLAYER_POOL.slice(0, 10)
 const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
-const DEFAULT_CHUNK_MINUTES = 10
+const DEFAULT_CHUNK_MINUTES = 20 / 3
 const DEFAULT_SHARE_SEED = 20260314
 const DEFAULT_SELECTED_TIMER_PERIOD = 1
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
@@ -300,13 +300,14 @@ function App() {
     () =>
       matchTimeline
         ? getMatchProgress({
-          timeline: matchTimeline,
-          timer: activeMatchTimer,
-          now: timerNow,
-        })
+            timeline: matchTimeline,
+            timer: activeMatchTimer,
+            now: timerNow,
+          })
         : null,
     [activeMatchTimer, matchTimeline, timerNow],
   )
+  const showFloatingMatchTimer = Boolean(matchProgress && matchTimeline && matchProgress.status !== 'idle')
   const canSelectTimerPeriod =
     Boolean(plan) && matchProgress?.status !== 'running' && matchProgress?.status !== 'paused'
 
@@ -560,7 +561,11 @@ function App() {
 
   return (
     <main className="relative min-h-screen overflow-hidden text-stone-100">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-3 py-4 sm:gap-8 sm:px-6 sm:py-6 lg:px-8">
+      <div
+        className={`mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-3 py-4 sm:gap-8 sm:px-6 sm:py-6 lg:px-8 ${
+          showFloatingMatchTimer ? 'pb-40 lg:pb-6' : ''
+        }`}
+      >
         <header className="grid gap-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-board backdrop-blur sm:rounded-[2rem] sm:gap-6 sm:p-6 md:grid-cols-[1.1fr_0.9fr]">
           <HeroPanel />
           <SettingsPanel
@@ -647,10 +652,10 @@ function App() {
 
             <PlayerMinutesSection plan={displayPlan} />
 
-            {matchProgress && matchTimeline && matchProgress.status !== 'idle' ? (
+            {showFloatingMatchTimer ? (
               <FloatingMatchTimer
-                matchProgress={matchProgress}
-                matchTimeline={matchTimeline}
+                matchProgress={matchProgress!}
+                matchTimeline={matchTimeline!}
                 onScrollToActiveSection={scrollToActiveMatchSection}
               />
             ) : null}
@@ -1139,8 +1144,8 @@ function FloatingMatchTimer({
   const canScrollToActiveSection = Boolean(getActiveChunkAnchorId(matchProgress))
 
   return (
-    <aside className="pointer-events-none fixed inset-x-3 bottom-3 z-40 sm:inset-x-auto sm:right-4 sm:top-4 sm:bottom-auto">
-      <div className="pointer-events-auto rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,24,13,0.94),rgba(12,18,10,0.96))] px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur xl:min-w-[18rem]">
+    <aside className="pointer-events-none fixed inset-x-3 bottom-3 z-40 lg:inset-x-auto lg:right-4 lg:top-4 lg:bottom-auto">
+      <div className="pointer-events-auto rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,24,13,0.94),rgba(12,18,10,0.96))] px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur lg:min-w-[18rem]">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-clay-100/70">
@@ -1213,8 +1218,8 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
               className="group rounded-[1.5rem] border border-white/10 bg-white/5 p-4 open:border-clay-300/20 open:bg-white/[0.07]"
             >
               <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
                     <h3 className="font-display text-2xl font-bold text-white">{summary.name}</h3>
                     <p className="font-mono text-xs uppercase tracking-[0.24em] text-stone-400">
                       {summary.goalkeeperPeriods.length > 0
@@ -1222,14 +1227,14 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                         : 'Ingen målvaktsperiod'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-2xl bg-clay-400 px-3 py-2 text-right text-clay-900">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                    <div className="rounded-2xl bg-clay-400 px-3 py-2 text-left text-clay-900 sm:text-right">
                       <p className="font-display text-2xl font-black">
                         {formatMinuteQuantity(minuteBreakdown.totalMinutes)}
                       </p>
                       <p className="font-mono text-[10px] uppercase tracking-[0.22em]">totalt</p>
                     </div>
-                    <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
+                    <span className="inline-flex w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
                       Visa detaljer
                     </span>
                   </div>
@@ -1302,7 +1307,7 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
               </summary>
 
               <div className="mt-5 border-t border-white/10 pt-4">
-                <div className="grid gap-3 sm:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <DetailStat
                     label="MV-tid"
                     value={`${formatMinuteQuantity(minuteBreakdown.goalkeeperMinutes)} min`}
@@ -2429,9 +2434,11 @@ function SummaryChip({ label, value }: { label: string; value: string }) {
 
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">{label}</p>
-      <p className="mt-1 text-sm font-medium text-white">{value}</p>
+    <div className="min-w-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+      <p className="break-words font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500 [overflow-wrap:anywhere]">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-medium text-white [overflow-wrap:anywhere]">{value}</p>
     </div>
   )
 }

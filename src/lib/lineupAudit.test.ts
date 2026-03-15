@@ -225,6 +225,88 @@ describe('createAuditRecord', () => {
     expect(record.flags).not.toContain('isolated-play-blocks')
   })
 
+  it('downgrades the dense 11-player four-sub case to a warning-level isolated block signal', () => {
+    const record = createAuditRecord(
+      createStandardScenario({
+        playerCount: 11,
+        periodMinutes: 20,
+        formation: '3-2-1',
+        substitutionsPerPeriod: 4,
+      }),
+      1,
+    )
+
+    expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(3)
+    expect(record.derivedMetrics.isolatedPlayBlockHardFlagThreshold).toBe(5)
+    expect(record.derivedMetrics.isolatedPlayBlockHardFlagPlayerCount).toBe(3)
+    expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('warning')
+    expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([
+      { name: 'Gunnar', isolatedPlayBlocks: 4 },
+    ])
+    expect(record.flags).not.toContain('isolated-play-blocks')
+  })
+
+  it('downgrades the dense 12-player four-sub case to a warning-level isolated block signal', () => {
+    const record = createAuditRecord(
+      createStandardScenario({
+        playerCount: 12,
+        periodMinutes: 20,
+        formation: '3-2-1',
+        substitutionsPerPeriod: 4,
+      }),
+      1,
+    )
+
+    expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(3)
+    expect(record.derivedMetrics.isolatedPlayBlockHardFlagThreshold).toBe(5)
+    expect(record.derivedMetrics.isolatedPlayBlockHardFlagPlayerCount).toBe(3)
+    expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('warning')
+    expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([
+      { name: 'David', isolatedPlayBlocks: 4 },
+      { name: 'John', isolatedPlayBlocks: 4 },
+    ])
+    expect(record.flags).not.toContain('isolated-play-blocks')
+  })
+
+  it.each([
+    {
+      formation: '2-3-1' as const,
+      seed: 7,
+      expectedPlayer: 'Henry',
+      scenarioId: 'players-12_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none',
+    },
+    {
+      formation: '3-2-1' as const,
+      seed: 42,
+      expectedPlayer: 'Joar',
+      scenarioId: 'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+    },
+  ])(
+    'keeps materially fragmented 12-player three-sub cases hard-flagged for $scenarioId',
+    ({ formation, seed, expectedPlayer, scenarioId }) => {
+      const record = createAuditRecord(
+        createStandardScenario({
+          playerCount: 12,
+          periodMinutes: 20,
+          formation,
+          substitutionsPerPeriod: 3,
+        }),
+        seed,
+      )
+
+      expect(record.input.scenarioId).toBe(scenarioId)
+      expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(3)
+      expect(record.derivedMetrics.isolatedPlayBlockHardFlagThreshold).toBe(4)
+      expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('flag')
+      expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([
+        { name: expectedPlayer, isolatedPlayBlocks: 5 },
+      ])
+      expect(record.derivedMetrics.totalMinuteSpread).toBeCloseTo(6.667, 3)
+      expect(record.derivedMetrics.benchMinuteSpread).toBeCloseTo(6.667, 3)
+      expect(record.flags).toContain('isolated-play-blocks')
+    },
+  )
+
   it.each([
     ['single-temporary-out', 20260315, 1],
     ['quick-return', 20260316, 2],
@@ -353,6 +435,39 @@ function createLiveScenario(
     rosterOrder: 'canonical' as const,
     rosterNames: [],
     liveAdjustmentPattern,
+  }
+}
+
+function createStandardScenario({
+  playerCount,
+  periodMinutes,
+  formation,
+  substitutionsPerPeriod,
+}: {
+  playerCount: number
+  periodMinutes: 15 | 20
+  formation: '2-3-1' | '3-2-1'
+  substitutionsPerPeriod: 2 | 3 | 4
+}) {
+  return {
+    scenarioId: buildScenarioId({
+      playerCount,
+      periodMinutes,
+      formation,
+      substitutionsPerPeriod,
+      goalkeeperMode: 'auto',
+      rosterOrder: 'canonical',
+      liveAdjustmentPattern: 'none',
+    }),
+    playerCount,
+    periodMinutes,
+    formation,
+    substitutionsPerPeriod,
+    chunkMinutes: getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
+    goalkeeperMode: 'auto' as const,
+    rosterOrder: 'canonical' as const,
+    rosterNames: [],
+    liveAdjustmentPattern: 'none' as const,
   }
 }
 

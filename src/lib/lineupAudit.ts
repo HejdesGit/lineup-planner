@@ -9,6 +9,7 @@ import { createNamedPlayers, getRosterNames, type RosterOrder } from './playerPo
 import {
   SUBSTITUTIONS_PER_PERIOD_OPTIONS,
   getChunkMinutesForSubstitutions,
+  getSubstitutionsPerPeriod,
   type SubstitutionsPerPeriod,
 } from './substitutions'
 import {
@@ -116,12 +117,21 @@ export interface AuditDerivedMetrics {
   allowedConsecutiveBenchWindowsPerPlayer: number
   allowedBenchStreakWindows: number
   allowedIsolatedPlayBlocksPerPlayer: number
+  isolatedPlayBlockHardFlagThreshold: number
+  isolatedPlayBlockHardFlagPlayerCount: number
+  isolatedPlayBlockSeverity: 'ok' | 'warning' | 'flag'
   goalkeeperMinutesTotal: number
   playerMetrics: PlayerAuditMetrics[]
   playersWithConsecutiveBenchWindows: string[]
   playersWithExcessConsecutiveBenchWindows: string[]
   playersWithIsolatedPlayBlocks: Array<{ name: string; isolatedPlayBlocks: number }>
   playersWithExcessIsolatedPlayBlocks: Array<{ name: string; isolatedPlayBlocks: number }>
+}
+
+interface IsolatedPlayBlockPolicy {
+  allowedIsolatedPlayBlocksPerPlayer: number
+  hardFlagMinOverage: number
+  hardFlagMinExcessPlayers: number
 }
 
 export interface AuditValidations {
@@ -444,7 +454,12 @@ export function analyzeMatchPlan(
 ) {
   const allChunks = plan.periods.flatMap((period) => period.chunks)
   const consecutiveBenchAllowance = getConsecutiveBenchAllowance(playerCount)
-  const isolatedPlayBlockAllowance = getIsolatedPlayBlockAllowance(playerCount)
+  const substitutionsPerPeriod = getSubstitutionsPerPeriod(plan.periodMinutes, chunkMinutes)
+  const isolatedPlayBlockPolicy = getIsolatedPlayBlockPolicy({
+    playerCount,
+    chunkMinutes,
+    substitutionsPerPeriod,
+  })
   const matchMinutes = PERIOD_COUNT * plan.periodMinutes
   const expectedTotalMinutes = PERIOD_COUNT * plan.periodMinutes * 7
   const expectedBenchMinutes = PERIOD_COUNT * plan.periodMinutes * (playerCount - 7)
@@ -478,7 +493,10 @@ export function analyzeMatchPlan(
       isolatedPlayBlocks: metrics.isolatedPlayBlocks,
     }))
   const playersWithExcessIsolatedPlayBlocks = playerMetrics
-    .filter((metrics) => metrics.isolatedPlayBlocks > isolatedPlayBlockAllowance)
+    .filter(
+      (metrics) =>
+        metrics.isolatedPlayBlocks > isolatedPlayBlockPolicy.allowedIsolatedPlayBlocksPerPlayer,
+    )
     .map((metrics) => ({
       name: metrics.name,
       isolatedPlayBlocks: metrics.isolatedPlayBlocks,
@@ -492,6 +510,13 @@ export function analyzeMatchPlan(
   )
   const totalMinuteSpread = roundAuditValue(Math.max(...totalMinutes) - Math.min(...totalMinutes))
   const benchMinuteSpread = roundAuditValue(Math.max(...benchMinutes) - Math.min(...benchMinutes))
+  const isolatedPlayBlockSeverity = classifyIsolatedPlayBlockSeverity({
+    playersWithExcessIsolatedPlayBlocks,
+    policy: isolatedPlayBlockPolicy,
+    totalMinuteSpread,
+    benchMinuteSpread,
+    maxAllowedMinuteSpread,
+  })
 
   return {
     derivedMetrics: {
@@ -505,7 +530,13 @@ export function analyzeMatchPlan(
       allowedConsecutiveBenchWindowsPerPlayer:
         consecutiveBenchAllowance.allowedConsecutiveBenchWindowsPerPlayer,
       allowedBenchStreakWindows: consecutiveBenchAllowance.allowedBenchStreakWindows,
-      allowedIsolatedPlayBlocksPerPlayer: isolatedPlayBlockAllowance,
+      allowedIsolatedPlayBlocksPerPlayer:
+        isolatedPlayBlockPolicy.allowedIsolatedPlayBlocksPerPlayer,
+      isolatedPlayBlockHardFlagThreshold:
+        isolatedPlayBlockPolicy.allowedIsolatedPlayBlocksPerPlayer +
+        isolatedPlayBlockPolicy.hardFlagMinOverage,
+      isolatedPlayBlockHardFlagPlayerCount: isolatedPlayBlockPolicy.hardFlagMinExcessPlayers,
+      isolatedPlayBlockSeverity,
       goalkeeperMinutesTotal: playerMetrics.reduce(
         (total, metrics) => total + metrics.goalkeeperMinutes,
         0,
@@ -544,8 +575,64 @@ function getConsecutiveBenchAllowance(playerCount: number) {
   }
 }
 
-function getIsolatedPlayBlockAllowance(playerCount: number) {
-  return Math.min(Math.max(playerCount - 7, 2), 3)
+function getIsolatedPlayBlockPolicy({
+  playerCount,
+  chunkMinutes,
+  substitutionsPerPeriod,
+}: {
+  playerCount: number
+  chunkMinutes: number
+  substitutionsPerPeriod: SubstitutionsPerPeriod
+}): IsolatedPlayBlockPolicy {
+  const baseAllowance = Math.min(Math.max(playerCount - 7, 2), 3)
+  const isDenseHighRotationCohort =
+    playerCount >= 11 &&
+    substitutionsPerPeriod >= 4 &&
+    chunkMinutes <= 5 + MINUTE_TOLERANCE
+
+  return {
+    allowedIsolatedPlayBlocksPerPlayer: baseAllowance,
+    hardFlagMinOverage: isDenseHighRotationCohort ? 2 : 1,
+    hardFlagMinExcessPlayers: isDenseHighRotationCohort ? 3 : 1,
+  }
+}
+
+function classifyIsolatedPlayBlockSeverity({
+  playersWithExcessIsolatedPlayBlocks,
+  policy,
+  totalMinuteSpread,
+  benchMinuteSpread,
+  maxAllowedMinuteSpread,
+}: {
+  playersWithExcessIsolatedPlayBlocks: Array<{ name: string; isolatedPlayBlocks: number }>
+  policy: IsolatedPlayBlockPolicy
+  totalMinuteSpread: number
+  benchMinuteSpread: number
+  maxAllowedMinuteSpread: number
+}): 'ok' | 'warning' | 'flag' {
+  if (playersWithExcessIsolatedPlayBlocks.length === 0) {
+    return 'ok'
+  }
+
+  const maxOverage = Math.max(
+    ...playersWithExcessIsolatedPlayBlocks.map(
+      ({ isolatedPlayBlocks }) =>
+        isolatedPlayBlocks - policy.allowedIsolatedPlayBlocksPerPlayer,
+    ),
+  )
+  const fairnessDrifted =
+    totalMinuteSpread > maxAllowedMinuteSpread + MINUTE_TOLERANCE ||
+    benchMinuteSpread > maxAllowedMinuteSpread + MINUTE_TOLERANCE
+
+  if (
+    maxOverage >= policy.hardFlagMinOverage ||
+    playersWithExcessIsolatedPlayBlocks.length >= policy.hardFlagMinExcessPlayers ||
+    fairnessDrifted
+  ) {
+    return 'flag'
+  }
+
+  return 'warning'
 }
 
 function buildPlayerAuditMetrics(
@@ -680,7 +767,7 @@ function buildFlags(record: GeneratedAuditRecord, validations: AuditValidations)
   if (!validations.livePatternCompleted) {
     flags.push('live-pattern-incomplete')
   }
-  if (record.derivedMetrics.playersWithExcessIsolatedPlayBlocks.length > 0) {
+  if (record.derivedMetrics.isolatedPlayBlockSeverity === 'flag') {
     flags.push('isolated-play-blocks')
   }
 

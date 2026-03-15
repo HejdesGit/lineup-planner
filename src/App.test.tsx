@@ -115,11 +115,11 @@ describe('App', () => {
     expect(screen.getByText(/speltid per spelare/i)).toBeInTheDocument()
   })
 
-  it('shows a chunk recommendation for bigger rosters with long windows', () => {
+  it('does not show a chunk recommendation when 3 byten is selected by default', () => {
     render(<App />)
 
-    expect(screen.getByText(/rekommendation/i)).toBeInTheDocument()
-    expect(screen.getByText(/kan väntan bli lång/i)).toBeInTheDocument()
+    expect(screen.queryByText(/rekommendation/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/kan väntan bli lång/i)).not.toBeInTheDocument()
   })
 
   it('shows curated chunk options for 3x20 and 3x15', async () => {
@@ -143,7 +143,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByLabelText(/antal byten/i)).toHaveValue('10')
+    expect(screen.getByLabelText(/antal byten/i)).toHaveValue(`${20 / 3}`)
 
     await user.selectOptions(screen.getByLabelText(/matchformat/i), '15')
 
@@ -410,7 +410,7 @@ describe('App', () => {
 
     const activePeriod = document.querySelector('[data-period="2"][data-period-state="active"]')
     const completedPeriod = document.querySelector('[data-period="1"][data-period-state="completed"]')
-    const activeChunk = activePeriod?.querySelector('[data-chunk-index="1"][data-chunk-state="active"]')
+    const activeChunk = activePeriod?.querySelector('[data-chunk-index="2"][data-chunk-state="active"]')
 
     expect(completedPeriod).toBeNull()
     expect(activePeriod).not.toBeNull()
@@ -449,7 +449,7 @@ describe('App', () => {
       periodDurationMs: 20 * 60_000,
     })
     expect(screen.getAllByText('7:00').length).toBeGreaterThan(1)
-    expect(screen.getAllByText(/pausad i period 1 · byteblock 1/i).length).toBeGreaterThan(1)
+    expect(screen.getAllByText(/pausad i period 1 · byteblock 2/i).length).toBeGreaterThan(1)
 
     act(() => {
       vi.advanceTimersByTime(3 * 60_000)
@@ -464,7 +464,7 @@ describe('App', () => {
     })
 
     expect(screen.getAllByText('9:00').length).toBeGreaterThan(1)
-    expect(screen.getAllByText(/pågår i period 1 · byteblock 1/i).length).toBeGreaterThan(1)
+    expect(screen.getAllByText(/pågår i period 1 · byteblock 2/i).length).toBeGreaterThan(1)
   })
 
   it('resets the timer when a new lineup is generated', async () => {

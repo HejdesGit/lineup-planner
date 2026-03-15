@@ -90,6 +90,97 @@ describe('generate-lineup-audit CLI', () => {
     expect(existsSync(seedSevenPath)).toBe(false)
   })
 
+  it('keeps dense four-sub isolated-block cases visible in seed metrics without counting them as hard-flagged exports', () => {
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'lineup-audit-'))
+    tempDirs.push(outDir)
+
+    execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
+      'run',
+      'generate:lineup-audit',
+      '--',
+      `--outDir=${outDir}`,
+      '--playerCounts=11,12',
+      '--periodMinutes=20',
+      '--formations=3-2-1',
+      '--substitutions=3,4',
+      '--goalkeeperModes=auto',
+      '--rosterOrders=canonical',
+      '--seeds=1',
+    ], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    })
+
+    const summary = readJson<{
+      scenarioCount: number
+      exportCount: number
+      flaggedExportCount: number
+    }>(path.join(outDir, 'summary.json'))
+    const denseWarningManifest = readJson<{
+      aggregate: { flaggedSeedCount: number; uniqueFlags: string[] }
+    }>(
+      path.join(
+        outDir,
+        'scenarios',
+        'players-12_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
+        'manifest.json',
+      ),
+    )
+    const denseWarningSeed = readJson<{
+      derivedMetrics: {
+        isolatedPlayBlockSeverity: string
+        playersWithExcessIsolatedPlayBlocks: Array<{ name: string; isolatedPlayBlocks: number }>
+      }
+      flags: string[]
+    }>(
+      path.join(
+        outDir,
+        'scenarios',
+        'players-12_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
+        'seed-1.json',
+      ),
+    )
+    const denseFlagManifest = readJson<{
+      aggregate: { flaggedSeedCount: number; uniqueFlags: string[] }
+    }>(
+      path.join(
+        outDir,
+        'scenarios',
+        'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+        'manifest.json',
+      ),
+    )
+    const denseFlagSeed = readJson<{
+      derivedMetrics: { isolatedPlayBlockSeverity: string }
+      flags: string[]
+    }>(
+      path.join(
+        outDir,
+        'scenarios',
+        'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+        'seed-1.json',
+      ),
+    )
+
+    expect(summary.scenarioCount).toBe(4)
+    expect(summary.exportCount).toBe(4)
+    expect(summary.flaggedExportCount).toBe(1)
+
+    expect(denseWarningManifest.aggregate.flaggedSeedCount).toBe(0)
+    expect(denseWarningManifest.aggregate.uniqueFlags).toEqual([])
+    expect(denseWarningSeed.derivedMetrics.isolatedPlayBlockSeverity).toBe('warning')
+    expect(denseWarningSeed.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([
+      { name: 'David', isolatedPlayBlocks: 4 },
+      { name: 'John', isolatedPlayBlocks: 4 },
+    ])
+    expect(denseWarningSeed.flags).toEqual([])
+
+    expect(denseFlagManifest.aggregate.flaggedSeedCount).toBe(1)
+    expect(denseFlagManifest.aggregate.uniqueFlags).toEqual(['isolated-play-blocks'])
+    expect(denseFlagSeed.derivedMetrics.isolatedPlayBlockSeverity).toBe('flag')
+    expect(denseFlagSeed.flags).toContain('isolated-play-blocks')
+  })
+
   it('keeps overlapping audit live-pattern semantics aligned with live scenario presets', () => {
     const patternToPreset = {
       'single-temporary-out': {
