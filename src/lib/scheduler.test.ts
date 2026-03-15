@@ -320,6 +320,47 @@ describe('generateMatchPlan', () => {
     }
   })
 
+  it('orders incoming substitutions by the previous bench order', () => {
+    const players: Player[] = [
+      { id: 'p-1', name: 'Adam' },
+      { id: 'p-2', name: 'Anton' },
+      { id: 'p-3', name: 'Bill' },
+      { id: 'p-4', name: 'Dante' },
+      { id: 'p-5', name: 'Elias' },
+      { id: 'p-6', name: 'Emil' },
+      { id: 'p-7', name: 'Gunnar' },
+      { id: 'p-8', name: 'Henry' },
+      { id: 'p-9', name: 'Jax' },
+      { id: 'p-10', name: 'Noel' },
+    ]
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 15,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [players[9].id, players[8].id, players[7].id],
+      seed: 1,
+      attempts: 1,
+    })
+    const firstPeriod = plan.periods[0]
+    const firstChunk = firstPeriod.chunks[0]
+    const secondChunk = firstPeriod.chunks[1]
+    const incomingNames = secondChunk.substitutions.map(
+      (substitution) => players.find((player) => player.id === substitution.playerInId)?.name,
+    )
+    const previousBenchNames = players
+      .filter((player) => firstChunk.substitutes.includes(player.name))
+      .map((player) => player.name)
+
+    expect(previousBenchNames).toEqual(['Adam', 'Henry', 'Jax'])
+    expect(incomingNames).toEqual(previousBenchNames)
+    expect(secondChunk.substitutions[0]).toMatchObject({
+      playerInId: players[0].id,
+      playerOutId: players[4].id,
+      position: 'CM',
+    })
+  })
+
   it('allows a full position reset between periods', () => {
     const players = createPlayers(10)
     let foundBoundaryReset = false

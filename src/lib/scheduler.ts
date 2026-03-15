@@ -353,6 +353,10 @@ function buildCandidatePlan(
   const matchChunks = buildMatchChunks(periodMinutes, chunkMinutes)
   const totalPlayerMinutes = PERIOD_COUNT * periodMinutes * 7
   const playerIds = players.map((player) => player.id)
+  const playerOrderById = Object.fromEntries(playerIds.map((id, index) => [id, index])) as Record<
+    string,
+    number
+  >
   const nameById = Object.fromEntries(players.map((player) => [player.id, player.name]))
   const targets = distributeTargetMinutes(playerIds, totalPlayerMinutes, rng)
   const goalkeepers = resolveGoalkeepers(playerIds, normalizeLockedGoalkeepers(lockedGoalkeeperIds), rng)
@@ -403,7 +407,7 @@ function buildCandidatePlan(
               lineup: assignBestPositions(outfieldPlayers, positions, histories, phase),
               substitutions: [],
             }
-          : assignInPeriodLineup(outfieldPlayers, previousLineup, positions, histories)
+          : assignInPeriodLineup(outfieldPlayers, previousLineup, positions, histories, playerOrderById)
       const assignment = assignmentResult.lineup
       const activePlayerIds = [goalkeeperId, ...positions.map((position) => getLineupPlayer(assignment, position))]
       const activeSet = new Set(activePlayerIds)
@@ -896,6 +900,7 @@ function assignInPeriodLineup(
   previousLineup: Lineup,
   positions: readonly OutfieldPosition[],
   histories: Record<string, PlayerHistory>,
+  playerOrderById: Record<string, number>,
 ): AssignmentResult {
   const previousAssignments = positions.map((position) => ({
     position,
@@ -952,6 +957,10 @@ function assignInPeriodLineup(
       position: outgoingAssignment.position,
     }
   })
+
+  substitutions.sort(
+    (left, right) => playerOrderById[left.playerInId] - playerOrderById[right.playerInId],
+  )
 
   return {
     lineup: nextLineup,
