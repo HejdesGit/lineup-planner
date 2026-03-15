@@ -57,6 +57,7 @@ describe('generate-lineup-audit CLI', () => {
     const summary = readJson<{ scenarioCount: number; exportCount: number }>(
       path.join(outDir, 'summary.json'),
     )
+    const promptPath = path.join(outDir, 'AI_REVIEW_PROMPT.md')
     const manifestPath = path.join(outDir, 'scenarios', scenarioId, 'manifest.json')
     const seedOnePath = path.join(outDir, 'scenarios', scenarioId, 'seed-1.json')
     const seedSevenPath = path.join(outDir, 'scenarios', scenarioId, 'seed-7.json')
@@ -66,9 +67,16 @@ describe('generate-lineup-audit CLI', () => {
     expect(index.filters.livePatterns).toEqual(['single-temporary-out'])
     expect(summary.scenarioCount).toBe(1)
     expect(summary.exportCount).toBe(2)
+    expect(existsSync(promptPath)).toBe(true)
     expect(existsSync(manifestPath)).toBe(true)
     expect(existsSync(seedOnePath)).toBe(true)
     expect(existsSync(seedSevenPath)).toBe(true)
+
+    const prompt = readFileSync(promptPath, 'utf8')
+    expect(prompt).toContain('## Bedömningsregler')
+    expect(prompt).toContain('> config.chunkMinutes')
+    expect(prompt).toContain('0.5 * config.chunkMinutes')
+    expect(prompt).toContain('prioriteringsordning')
 
     const manifest = readJson<{ seeds: unknown[]; aggregate: { seedCount: number } }>(manifestPath)
     expect(manifest.seeds).toHaveLength(2)

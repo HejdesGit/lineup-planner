@@ -324,10 +324,20 @@ Du granskar exportdata i \`docs/generated-lineups\`. Fokusera på resultaten i e
 - Alla icke-tomma \`flags\` är värdiga att kommentera, även om valideringarna passerar.
 - Scenarion som ligger på eller nära högsta observerade \`totalMinuteSpread\` eller \`benchMinuteSpread\` ska granskas som hög prioritet.
 - Bedöm korrekthet mot spelform, total speltid, bänktid, rotationsbredd och målvaktslåsning i scenarioets config.
+- Använd dessa standardtrösklar om inte scenarioets regler tydligt motiverar något annat:
+  - \`totalMinuteSpread <= config.chunkMinutes\` är normalt; \`> config.chunkMinutes\` ska kommenteras; \`> 2 * config.chunkMinutes\` är ett allvarligt fairnessproblem
+  - \`benchMinuteSpread <= config.chunkMinutes\` är normalt; \`> config.chunkMinutes\` ska kommenteras; \`> 2 * config.chunkMinutes\` är ett allvarligt bänkproblem
+  - ett problem är återkommande om samma typ av obalans eller flagga syns i minst 2 seeds för samma scenario eller om \`aggregate.flaggedSeedCount >= 2\`
 - Jämför \`normalized\` mot \`legacy\` så här:
   - önskat: \`normalized\` minskar minutspridning, bänkspridning eller flaggor utan att skapa nya regelbrott
-  - neutralt: skillnaderna är små och ger ingen tydlig effekt på fairness eller rotationsbredd
+  - neutralt: skillnader under \`0.5 * config.chunkMinutes\` i spreads är små om \`flags\` och \`validations\` i övrigt är likvärdiga
   - varningsflagga: \`normalized\` ökar spridning, skapar smalare rotation, ger sämre bänkfördelning eller introducerar nya flaggor
+- Om signalerna pekar åt olika håll, använd denna prioriteringsordning:
+  1. inga nya valideringsfel
+  2. färre eller mildare flaggor
+  3. lägre \`totalMinuteSpread\`
+  4. lägre \`benchMinuteSpread\`
+  5. jämnare \`playerMetrics\` och bredare rotation
 
 ## Viktiga fält
 - \`scoreBreakdown.normalized\`
