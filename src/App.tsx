@@ -931,32 +931,16 @@ function PeriodCard({
                     {formatChunkSubstitutions(chunk.substitutions, nameById)}
                   </>
                 ) : (
-                  'Startuppställning eller inga byten i detta fönster.'
+                  'Startuppställning eller inga byten i detta byteblock.'
                 )}
               </p>
-
-              <div className="grid gap-2 sm:grid-cols-2">
-                {period.positions.map((position) => {
-                  const playerId = chunkLineup[position]
-                  const playerName = readLineupPlayer(chunkLineup, position, nameById)
-                  const isIncomingNow = playerId ? currentIncomingIds.has(playerId) : false
-                  const isOutgoingNext = playerId ? nextOutgoingIds.has(playerId) : false
-
-                  return (
-                    <div
-                      key={`${chunk.chunkIndex}-${position}`}
-                      className={getChunkPositionCardClass(isIncomingNow, isOutgoingNext)}
-                    >
-                      <div className="min-w-0">
-                        <span className="font-mono text-xs uppercase tracking-[0.22em] text-clay-200">
-                          {position}
-                        </span>
-                      </div>
-                      <span className="text-sm font-medium text-white">{playerName}</span>
-                    </div>
-                  )
-                })}
-              </div>
+              <ChunkFormationBoard
+                formation={period.formation}
+                lineup={chunkLineup}
+                currentIncomingIds={currentIncomingIds}
+                nextOutgoingIds={nextOutgoingIds}
+                nameById={nameById}
+              />
             </div>
           )
         })}
@@ -1437,6 +1421,91 @@ function DetailStat({ label, value }: { label: string; value: string }) {
   )
 }
 
+function ChunkFormationBoard({
+  formation,
+  lineup,
+  currentIncomingIds,
+  nextOutgoingIds,
+  nameById,
+}: {
+  formation: FormationKey
+  lineup: Lineup
+  currentIncomingIds: Set<string>
+  nextOutgoingIds: Set<string>
+  nameById: Record<string, string>
+}) {
+  return (
+    <div className="rounded-[1rem] border border-pitch-300/15 bg-[radial-gradient(circle_at_top,_rgba(141,184,99,0.12),_transparent_40%),linear-gradient(180deg,rgba(10,31,14,0.82),rgba(6,20,9,0.9))] p-2.5 sm:rounded-[1.2rem] sm:p-3">
+      <div className="space-y-2.5">
+        {FORMATION_PRESETS[formation].rows.map((row, rowIndex) => (
+          <div
+            key={`chunk-board-${formation}-${row.join('-')}`}
+            className={`flex items-center justify-center gap-2 ${rowIndex === 0 ? 'pb-0.5' : ''}`}
+          >
+            {row.map((position) => {
+              const playerId = lineup[position]
+              const playerName = readLineupPlayer(lineup, position, nameById)
+              const isIncomingNow = playerId ? currentIncomingIds.has(playerId) : false
+              const isOutgoingNext = playerId ? nextOutgoingIds.has(playerId) : false
+
+              return (
+                <ChunkPositionBadge
+                  key={`chunk-board-${position}-${playerId ?? 'empty'}`}
+                  label={position}
+                  player={playerName}
+                  tone={getPositionTone(position)}
+                  emphasis={getChunkPositionEmphasis(isIncomingNow, isOutgoingNext)}
+                  isSingle={row.length === 1}
+                />
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ChunkPositionBadge({
+  label,
+  player,
+  tone,
+  emphasis,
+  isSingle = false,
+}: {
+  label: string
+  player: string
+  tone: 'def' | 'mid' | 'att' | 'gk'
+  emphasis: 'idle' | 'incoming' | 'outgoing' | 'swing'
+  isSingle?: boolean
+}) {
+  const toneClasses = {
+    def: 'border-sky-300/22 bg-[linear-gradient(180deg,rgba(56,189,248,0.12),rgba(12,74,110,0.22))] text-sky-50',
+    mid: 'border-emerald-300/22 bg-[linear-gradient(180deg,rgba(74,222,128,0.12),rgba(6,78,59,0.22))] text-emerald-50',
+    att: 'border-amber-300/24 bg-[linear-gradient(180deg,rgba(245,158,11,0.14),rgba(120,53,15,0.24))] text-amber-50',
+    gk: 'border-white/15 bg-[linear-gradient(180deg,rgba(250,250,249,0.08),rgba(41,37,36,0.22))] text-stone-50',
+  }
+  const emphasisClasses = {
+    idle: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]',
+    incoming: 'ring-1 ring-emerald-300/45 shadow-[0_0_0_1px_rgba(16,185,129,0.12),0_0_18px_rgba(16,185,129,0.08)]',
+    outgoing: 'ring-1 ring-amber-300/45 shadow-[0_0_0_1px_rgba(245,158,11,0.12),0_0_18px_rgba(245,158,11,0.08)]',
+    swing: 'ring-1 ring-clay-300/45 shadow-[0_0_0_1px_rgba(212,125,51,0.14),0_0_18px_rgba(212,125,51,0.08)]',
+  }
+
+  return (
+    <div
+      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-2 text-center ${toneClasses[tone]} ${emphasisClasses[emphasis]} ${
+        isSingle ? 'max-w-[11rem]' : ''
+      }`}
+    >
+      <div className="pointer-events-none">
+        <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold text-white">{player}</p>
+      </div>
+    </div>
+  )
+}
+
 function buildPlayerDetail(
   plan: MatchPlan,
   playerId: string,
@@ -1907,20 +1976,20 @@ function formatChunkSubstitutions(
   ))
 }
 
-function getChunkPositionCardClass(isIncomingNow: boolean, isOutgoingNext: boolean) {
+function getChunkPositionEmphasis(isIncomingNow: boolean, isOutgoingNext: boolean) {
   if (isIncomingNow && isOutgoingNext) {
-    return 'flex items-center justify-between rounded-2xl border border-clay-300/35 bg-[linear-gradient(90deg,rgba(120,53,15,0.2),rgba(6,95,70,0.2))] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+    return 'swing' as const
   }
 
   if (isIncomingNow) {
-    return 'flex items-center justify-between rounded-2xl border border-emerald-400/35 bg-[linear-gradient(180deg,rgba(16,185,129,0.14),rgba(6,78,59,0.18))] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+    return 'incoming' as const
   }
 
   if (isOutgoingNext) {
-    return 'flex items-center justify-between rounded-2xl border border-amber-400/35 bg-[linear-gradient(180deg,rgba(245,158,11,0.12),rgba(120,53,15,0.18))] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+    return 'outgoing' as const
   }
 
-  return 'flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2'
+  return 'idle' as const
 }
 
 function getPositionTone(position: OutfieldPosition) {
