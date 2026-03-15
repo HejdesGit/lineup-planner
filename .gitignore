@@ -25,3 +25,5 @@ output
 *.sw?
 
 .playwright-cli/
+
+docs/generated-lineups/

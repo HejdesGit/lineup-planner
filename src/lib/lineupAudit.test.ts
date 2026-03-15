@@ -156,7 +156,7 @@ describe('createAuditRecord', () => {
       1,
     )
 
-    expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(4)
+    expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(3)
     expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([])
     expect(record.flags).not.toContain('isolated-play-blocks')
   })
@@ -262,6 +262,16 @@ function createManualPlan(): MatchPlan {
     goalkeepers: ['p-1', 'p-2', 'p-3'],
     lockedGoalkeepers: ['p-1', null, 'p-3'],
     targets: {
+      'p-1': 45,
+      'p-2': 45,
+      'p-3': 45,
+      'p-4': 45,
+      'p-5': 45,
+      'p-6': 45,
+      'p-7': 45,
+      'p-8': 0,
+    },
+    fairnessTargets: {
       'p-1': 45,
       'p-2': 45,
       'p-3': 45,

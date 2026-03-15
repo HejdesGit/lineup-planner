@@ -34,9 +34,11 @@ describe('live-adjustment-scenarios CLI', () => {
 
     expect(result.hardFailureCount).toBe(0)
     expect(parsed.aiValidation.status).toBe('prepared')
-    expect(parsed.aiValidation.summary.scenarioCount).toBe(6)
-    expect(parsed.scenarios).toHaveLength(6)
+    expect(parsed.aiValidation.summary.scenarioCount).toBe(17)
+    expect(parsed.scenarios).toHaveLength(17)
     expect(markdownContent).toContain('# Live Scenario Simulation Report')
     expect(markdownContent).toContain('## Minimal bench options (`minimal-bench-options`)')
+    expect(markdownContent).toContain('## Injury mid match (`injury-mid-match`)')
+    expect(markdownContent).toContain('## Empty bench no options (`empty-bench-no-options`)')
   })
 })

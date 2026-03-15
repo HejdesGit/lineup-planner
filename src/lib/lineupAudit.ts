@@ -462,7 +462,7 @@ function getConsecutiveBenchAllowance(playerCount: number) {
 }
 
 function getIsolatedPlayBlockAllowance(playerCount: number) {
-  return Math.max(playerCount - 7, 2)
+  return Math.min(Math.max(playerCount - 7, 2), 3)
 }
 
 function buildPlayerAuditMetrics(

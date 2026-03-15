@@ -42,37 +42,49 @@ const AI_CHECKLIST_QUESTIONS = [
 
 type ScenarioStep =
   | {
-      id: string
-      label: string
-      type: 'temporary-out'
-      period: number
-      minute: number
-      target: ScenarioTarget
-    }
+    id: string
+    label: string
+    expectNoRecommendation?: boolean
+    type: 'injury'
+    period: number
+    minute: number
+    target: ScenarioTarget
+  }
   | {
-      id: string
-      label: string
-      type: 'return'
-      period: number
-      minute: number
-      target: ScenarioTarget
-    }
+    id: string
+    label: string
+    expectNoRecommendation?: boolean
+    type: 'temporary-out'
+    period: number
+    minute: number
+    target: ScenarioTarget
+  }
+  | {
+    id: string
+    label: string
+    expectNoRecommendation?: boolean
+    type: 'return'
+    period: number
+    minute: number
+    target: ScenarioTarget
+  }
 
 type ScenarioTarget =
   | {
-      type: 'first-active-outfielder'
-    }
+    type: 'first-active-outfielder'
+  }
   | {
-      type: 'previous-result'
-      stepId: string
-      field: 'playerId' | 'replacementPlayerId'
-    }
+    type: 'previous-result'
+    stepId: string
+    field: 'playerId' | 'replacementPlayerId'
+  }
 
 interface ScenarioPreset {
   id: string
   name: string
   description: string
   config: LiveScenarioInitialConfig
+  maxExpectedFairnessDeltaMinutes?: number
   steps: ScenarioStep[]
 }
 
@@ -85,7 +97,7 @@ interface ScenarioState {
     string,
     {
       playerId: string
-      replacementPlayerId: string
+      replacementPlayerId: string | null
     }
   >
   unavailableLeakCheckPassed: boolean
@@ -93,7 +105,7 @@ interface ScenarioState {
 
 interface AppliedScenarioEvent {
   playerId: string
-  replacementPlayerId: string
+  replacementPlayerId: string | null
   state: ScenarioState
 }
 
@@ -112,6 +124,7 @@ export interface LiveScenarioEventLogEntry {
   chunkWindowIndex: number
   description: string
   didNotReturnBeforeFinalWhistle: boolean
+  eventApplied: boolean
   futureGoalkeeperMinutes: number
   goalkeeperPenaltyApplied: boolean
   isExactBoundaryMinute: boolean
@@ -120,7 +133,7 @@ export interface LiveScenarioEventLogEntry {
   period: number
   playerId: string
   playerName: string
-  poolType: 'bench' | 'active-outfield'
+  poolType: 'bench' | 'active-outfield' | 'none'
   position: OutfieldPosition
   recommendationPoolSize: number
   recommendationRank: number
@@ -147,7 +160,9 @@ export interface LiveScenarioValidationSummary {
   totalMinutesMatch: boolean
   fairnessTargetsMatch: boolean
   noUnavailableLeaks: boolean
+  unavailableTargetsFrozen: boolean
   fairnessWithinTolerance: boolean
+  scenarioFairnessExpectationMet: boolean
   recommendationLooksReasonable: boolean
   chunkSplitsApplied: boolean
   hardInvariantsPassed: boolean
@@ -395,6 +410,111 @@ const SCENARIO_PRESETS: ScenarioPreset[] = [
     ],
   },
   {
+    id: 'injury-mid-match',
+    name: 'Injury mid match',
+    description:
+      'En aktiv utespelare skadar sig mitt i period 2 och utgår resten av matchen, så att kvarvarande speltid måste fördelas om jämt.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260321,
+    }),
+    steps: [
+      {
+        id: 'injury-out',
+        label: 'En aktiv spelare skadar sig i period 2 minut 9 och kan inte återvända.',
+        type: 'injury',
+        period: 2,
+        minute: 9,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'shoe-tying-brief-absence',
+    name: 'Shoe tying brief absence',
+    description:
+      'En spelare måste snabbt knyta skorna, missar ungefär en minut och ska sedan kunna återvända utan att fairness drar iväg onödigt mycket.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260322,
+    }),
+    maxExpectedFairnessDeltaMinutes: 8,
+    steps: [
+      {
+        id: 'shoe-tie-out',
+        label: 'En aktiv spelare går av i period 1 minut 7 för att knyta skorna.',
+        type: 'temporary-out',
+        period: 1,
+        minute: 7,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'shoe-tie-return',
+        label: 'Spelaren är redo igen ungefär en minut senare.',
+        type: 'return',
+        period: 1,
+        minute: 8,
+        target: { type: 'previous-result', stepId: 'shoe-tie-out', field: 'playerId' },
+      },
+    ],
+  },
+  {
+    id: 'out-for-one-period',
+    name: 'Temporary-out for one full period',
+    description:
+      'En spelare måste utgå hela period 2 men kommer tillbaka i början av period 3, vilket ska ge en rimlig omfördelning under frånvaron.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260323,
+    }),
+    steps: [
+      {
+        id: 'period-out',
+        label: 'En aktiv spelare går ut direkt vid start av period 2.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 0,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'period-return',
+        label: 'Spelaren är tillbaka vid start av period 3.',
+        type: 'return',
+        period: 3,
+        minute: 0,
+        target: { type: 'previous-result', stepId: 'period-out', field: 'playerId' },
+      },
+    ],
+  },
+  {
+    id: 'injury-at-kickoff',
+    name: 'Injury at kickoff',
+    description:
+      'En spelare skadar sig direkt vid avspark och resten av matchen måste därför fördelas så jämt som möjligt mellan de tillgängliga spelarna.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260324,
+    }),
+    steps: [
+      {
+        id: 'kickoff-injury',
+        label: 'En aktiv spelare skadar sig direkt vid period 1 minut 0.',
+        type: 'injury',
+        period: 1,
+        minute: 0,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
     id: 'minimal-bench-options',
     name: 'Minimal bench options',
     description:
@@ -413,6 +533,199 @@ const SCENARIO_PRESETS: ScenarioPreset[] = [
         type: 'temporary-out',
         period: 2,
         minute: 5,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'double-temporary-out',
+    name: 'Double temporary-out in same period',
+    description:
+      'Två aktiva utespelare måste kliva av i samma period med kort mellanrum, vilket pressar fairness-omfördelningen i snabb följd.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260325,
+    }),
+    steps: [
+      {
+        id: 'double-out-1',
+        label: 'Första spelaren går ut i period 2 minut 5.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 5,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'double-out-2',
+        label: 'En andra spelare går ut i period 2 minut 7.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 7,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'goalkeeper-penalty-bench-pick',
+    name: 'Goalkeeper penalty on forced bench pick',
+    description:
+      'När laget bara har en bänkspelare kvar tidigt i matchen måste samma spelare in trots framtida målvaktsminuter, vilket ska synas som MV-penalty i loggen.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      playerNames: DEFAULT_PLAYER_NAMES.slice(0, 8),
+      seed: 20260326,
+    }),
+    steps: [
+      {
+        id: 'gk-penalty-out',
+        label: 'En aktiv spelare går ut i period 1 minut 3 när bara en bänkspelare finns.',
+        type: 'temporary-out',
+        period: 1,
+        minute: 3,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'cross-period-return',
+    name: 'Cross period return',
+    description:
+      'En spelare går ut tidigt i period 1 och kommer inte tillbaka förrän mitt i period 3, vilket tvingar omplanering över två periodgränser.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260327,
+    }),
+    steps: [
+      {
+        id: 'cross-period-out',
+        label: 'En aktiv spelare går ut i period 1 minut 5.',
+        type: 'temporary-out',
+        period: 1,
+        minute: 5,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'cross-period-return',
+        label: 'Spelaren blir redo igen först i period 3 minut 10.',
+        type: 'return',
+        period: 3,
+        minute: 10,
+        target: { type: 'previous-result', stepId: 'cross-period-out', field: 'playerId' },
+      },
+    ],
+  },
+  {
+    id: 'injury-on-replacement',
+    name: 'Replacement gets injured',
+    description:
+      'En ersättare kommer in efter ett tillfälligt avbrott men skadar sig själv kort därefter, vilket ger två omfördelningar i samma period.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260328,
+    }),
+    steps: [
+      {
+        id: 'replacement-injury-out',
+        label: 'En aktiv spelare går ut i period 2 minut 8.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 8,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'replacement-injury',
+        label: 'Den nyinsatta ersättaren skadar sig i period 2 minut 9.',
+        type: 'injury',
+        period: 2,
+        minute: 9,
+        target: {
+          type: 'previous-result',
+          stepId: 'replacement-injury-out',
+          field: 'replacementPlayerId',
+        },
+      },
+    ],
+  },
+  {
+    id: 'formation-3-2-1-mid-out',
+    name: '3-2-1 temporary-out mid period',
+    description:
+      'Samma grundscenario som mitt-i-period-byte men i formation 3-2-1 för att verifiera att livejusteringar fungerar med annan positionsuppsättning.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '3-2-1',
+      periodMinutes: 20,
+      seed: 20260329,
+    }),
+    steps: [
+      {
+        id: 'formation-out',
+        label: 'En aktiv spelare går ut i period 2 minut 10 i formation 3-2-1.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 10,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'short-periods-injury',
+    name: 'Injury with 15-minute periods',
+    description:
+      'Ett scenario med 15-minutersperioder där en spelare skadar sig mitt i period 1, så att chunkmatematiken för kortare matcher också valideras.',
+    config: createScenarioConfig({
+      chunkMinutes: 7.5,
+      formation: '2-3-1',
+      periodMinutes: 15,
+      seed: 20260330,
+    }),
+    steps: [
+      {
+        id: 'short-period-injury',
+        label: 'En aktiv spelare skadar sig i period 1 minut 7.',
+        type: 'injury',
+        period: 1,
+        minute: 7,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'empty-bench-no-options',
+    name: 'Empty bench no options',
+    description:
+      'När enda bänkspelaren redan är insatt och ytterligare en spelare måste kliva av ska scenariomotorn kunna rapportera att ingen ersättare finns.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      playerNames: DEFAULT_PLAYER_NAMES.slice(0, 8),
+      seed: 20260331,
+    }),
+    steps: [
+      {
+        id: 'empty-bench-first-out',
+        label: 'En aktiv spelare går ut i period 2 minut 5 så att bänken töms.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 5,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'empty-bench-second-out',
+        label: 'En annan spelare måste också kliva av i period 2 minut 8, men ingen ersättare finns kvar.',
+        expectNoRecommendation: true,
+        type: 'temporary-out',
+        period: 2,
+        minute: 8,
         target: { type: 'first-active-outfielder' },
       },
     ],
@@ -506,8 +819,10 @@ export function renderLiveScenarioMarkdown(bundle: LiveScenarioArtifactsBundle) 
       ['Totala minuter stämmer', scenario.validations.totalMinutesMatch],
       ['Fairness-targets summerar korrekt', scenario.validations.fairnessTargetsMatch],
       ['Tillfälligt ute-spelare läcker inte tillbaka', scenario.validations.noUnavailableLeaks],
+      ['Otillgängliga spelare får inga framtida fairness-minuter', scenario.validations.unavailableTargetsFrozen],
       ['Chunk-splittar skapades korrekt', scenario.validations.chunkSplitsApplied],
       ['Fairness ligger inom tolerans', scenario.validations.fairnessWithinTolerance],
+      ['Scenariots fairnessförväntan uppfylls', scenario.validations.scenarioFairnessExpectationMet],
       ['Rekommenderat byte ser rimligt ut lokalt', scenario.validations.recommendationLooksReasonable],
     ]
 
@@ -613,6 +928,9 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
   const targetPlayerId = resolveScenarioTargetPlayerId(state, step)
   const resolvedChunk = resolveScenarioChunkAtMinute(state.plan, step.period, step.minute)
   const currentChunk = resolvedChunk?.chunk
+  const currentPlayerNameById = Object.fromEntries(
+    state.plan.summaries.map((summary) => [summary.playerId, summary.name]),
+  ) as Record<string, string>
 
   if (!currentChunk || !resolvedChunk) {
     throw new Error(`Saknar aktivt byteblock för scenariosteget ${step.id}.`)
@@ -628,35 +946,94 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
   })
   const selectedRecommendation = recommendations[0]
 
+  if (step.expectNoRecommendation) {
+    if (selectedRecommendation) {
+      throw new Error(`Förväntade ingen rekommendation för scenariosteget ${step.id}.`)
+    }
+
+    const nextNarrative = formatNoRecommendationNarrative({
+      minute: step.minute,
+      period: step.period,
+      playerName: currentPlayerNameById[targetPlayerId],
+      type: step.type,
+    })
+
+    return {
+      playerId: targetPlayerId,
+      replacementPlayerId: null,
+      state: {
+        ...state,
+        eventLog: [
+          ...state.eventLog,
+          {
+            chunkSplitApplied: false,
+            chunkWindowIndex: resolvedChunk.chunkIndex + 1,
+            description: nextNarrative,
+            didNotReturnBeforeFinalWhistle: false,
+            eventApplied: false,
+            futureGoalkeeperMinutes: 0,
+            goalkeeperPenaltyApplied: false,
+            isExactBoundaryMinute: resolvedChunk.isExactBoundaryMinute,
+            label: step.label,
+            minute: step.minute,
+            period: step.period,
+            playerId: targetPlayerId,
+            playerName: currentPlayerNameById[targetPlayerId],
+            poolType: 'none',
+            position: getDefaultOutfieldPosition(currentChunk, state.plan),
+            recommendationPoolSize: 0,
+            recommendationRank: 0,
+            recommendationReason: 'Ingen ersättare tillgänglig.',
+            recommendationScore: 0,
+            replacementFromExpectedPool: true,
+            replacementPlayerId: '',
+            replacementPlayerName: '',
+            resolvedChunkWindowIndex: resolvedChunk.chunkIndex + 1,
+            stepId: step.id,
+            type: step.type,
+          },
+        ],
+        eventNarrative: [...state.eventNarrative, nextNarrative],
+        stepResults: {
+          ...state.stepResults,
+          [step.id]: {
+            playerId: targetPlayerId,
+            replacementPlayerId: null,
+          },
+        },
+      },
+    }
+  }
+
   if (!selectedRecommendation) {
     throw new Error(`Saknar rekommendation för scenariosteget ${step.id}.`)
   }
 
   const next =
-    step.type === 'temporary-out'
+    step.type === 'return'
       ? replanMatchFromLiveEvent({
-          availability: state.availability,
-          event: {
-            type: 'temporary-out',
-            minute: step.minute,
-            period: step.period,
-            playerId: targetPlayerId,
-            replacementPlayerId: selectedRecommendation.playerId,
-            status: 'temporarily-out',
-          },
-          plan: state.plan,
-        })
+        availability: state.availability,
+        event: {
+          type: 'return',
+          minute: step.minute,
+          period: step.period,
+          playerId: targetPlayerId,
+          replacementPlayerId: selectedRecommendation.playerId,
+        },
+        plan: state.plan,
+      })
       : replanMatchFromLiveEvent({
-          availability: state.availability,
-          event: {
-            type: 'return',
-            minute: step.minute,
-            period: step.period,
-            playerId: targetPlayerId,
-            replacementPlayerId: selectedRecommendation.playerId,
-          },
-          plan: state.plan,
-        })
+        availability: state.availability,
+        event: {
+          type: step.type,
+          minute: step.minute,
+          period: step.period,
+          playerId: targetPlayerId,
+          replacementPlayerId: selectedRecommendation.playerId,
+          status: step.type === 'injury' ? 'injured' : 'temporarily-out',
+        },
+        plan: state.plan,
+      })
 
   const playerNameById = Object.fromEntries(
     next.plan.summaries.map((summary) => [summary.playerId, summary.name]),
@@ -682,10 +1059,10 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
     type: step.type,
   })
   const unavailableLeakCheckPassed =
-    step.type === 'temporary-out'
-      ? state.unavailableLeakCheckPassed &&
-        !isPlayerActiveFromMinute(next.plan, step.period, step.minute, targetPlayerId)
-      : state.unavailableLeakCheckPassed
+    step.type === 'return'
+      ? state.unavailableLeakCheckPassed
+      : state.unavailableLeakCheckPassed &&
+      !isPlayerActiveFromMinute(next.plan, step.period, step.minute, targetPlayerId)
 
   return {
     playerId: targetPlayerId,
@@ -699,6 +1076,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
           chunkWindowIndex: resolvedChunk.chunkIndex + 1,
           description: nextNarrative,
           didNotReturnBeforeFinalWhistle: false,
+          eventApplied: true,
           futureGoalkeeperMinutes: selectedRecommendation.futureGoalkeeperMinutes,
           goalkeeperPenaltyApplied: selectedRecommendation.goalkeeperPenaltyApplied,
           isExactBoundaryMinute: resolvedChunk.isExactBoundaryMinute,
@@ -707,7 +1085,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
           period: step.period,
           playerId: targetPlayerId,
           playerName: playerNameById[targetPlayerId],
-          poolType: step.type === 'temporary-out' ? 'bench' : 'active-outfield',
+          poolType: step.type === 'return' ? 'active-outfield' : 'bench',
           position: selectedRecommendation.position,
           recommendationPoolSize: recommendations.length,
           recommendationRank: 1,
@@ -735,7 +1113,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
   }
 }
 
-function resolveScenarioTargetPlayerId(state: ScenarioState, step: ScenarioStep) {
+function resolveScenarioTargetPlayerId(state: ScenarioState, step: ScenarioStep): string {
   if (step.target.type === 'previous-result') {
     const previous = state.stepResults[step.target.stepId]
 
@@ -743,7 +1121,13 @@ function resolveScenarioTargetPlayerId(state: ScenarioState, step: ScenarioStep)
       throw new Error(`Saknar tidigare scenariosteg ${step.target.stepId}.`)
     }
 
-    return previous[step.target.field]
+    const targetPlayerId = previous[step.target.field]
+
+    if (!targetPlayerId) {
+      throw new Error(`Saknar tidigare spelarreferens för scenariosteget ${step.id}.`)
+    }
+
+    return targetPlayerId
   }
 
   const chunk = resolveScenarioChunkAtMinute(state.plan, step.period, step.minute)?.chunk
@@ -787,17 +1171,29 @@ function finalizeScenarioReport(preset: ScenarioPreset, state: ScenarioState): L
     Math.max(...players.map((player) => Math.abs(player.deltaMinutes))),
   )
   const toleranceMinutes = roundMinuteValue(state.plan.chunkMinutes + 0.05)
-  const recommendationLooksReasonable = eventLog.every(
-    (event) => event.recommendationRank === 1 && event.recommendationPoolSize > 0 && event.replacementFromExpectedPool,
+  const unavailableTargetsFrozen = players.every(
+    (player) =>
+      player.status === 'available' || nearlyEqual(player.actualMinutes, player.fairnessTargetMinutes),
   )
-  const chunkSplitsApplied = eventLog.every((event) => event.chunkSplitApplied)
+  const scenarioFairnessExpectationMet =
+    maxAbsDeltaMinutes <= (preset.maxExpectedFairnessDeltaMinutes ?? toleranceMinutes) + EPSILON
+  const recommendationLooksReasonable = eventLog.every(
+    (event) =>
+      !event.eventApplied ||
+      (event.recommendationRank === 1 &&
+        event.recommendationPoolSize > 0 &&
+        event.replacementFromExpectedPool),
+  )
+  const chunkSplitsApplied = eventLog.every((event) => !event.eventApplied || event.chunkSplitApplied)
   const validations: LiveScenarioValidationSummary = {
     totalMinutesMatch:
       nearlyEqual(totalActualMinutes, expectedTotalMinutes) &&
       nearlyEqual(totalBenchMinutes, expectedBenchMinutes),
     fairnessTargetsMatch: nearlyEqual(totalFairnessTargetMinutes, expectedTotalMinutes),
     noUnavailableLeaks: state.unavailableLeakCheckPassed,
+    unavailableTargetsFrozen,
     fairnessWithinTolerance: maxAbsDeltaMinutes <= toleranceMinutes + EPSILON,
+    scenarioFairnessExpectationMet,
     recommendationLooksReasonable,
     chunkSplitsApplied,
     hardInvariantsPassed: false,
@@ -808,10 +1204,12 @@ function finalizeScenarioReport(preset: ScenarioPreset, state: ScenarioState): L
     validations.totalMinutesMatch &&
     validations.fairnessTargetsMatch &&
     validations.noUnavailableLeaks &&
+    validations.unavailableTargetsFrozen &&
     validations.chunkSplitsApplied
   validations.overallPassed =
     validations.hardInvariantsPassed &&
     validations.fairnessWithinTolerance &&
+    validations.scenarioFairnessExpectationMet &&
     validations.recommendationLooksReasonable
 
   const finalStatus = {
@@ -862,8 +1260,10 @@ function buildAiValidationInput(report: Omit<LiveScenarioReport, 'ai'>): AiValid
     `Totala minuter: ${report.validations.totalMinutesMatch ? 'pass' : 'fail'}`,
     `Fairness-targets: ${report.validations.fairnessTargetsMatch ? 'pass' : 'fail'}`,
     `Otillgänglig läcka: ${report.validations.noUnavailableLeaks ? 'pass' : 'fail'}`,
+    `Otillgängliga fairness-targets frysta: ${report.validations.unavailableTargetsFrozen ? 'pass' : 'fail'}`,
     `Chunk-splittar: ${report.validations.chunkSplitsApplied ? 'pass' : 'fail'}`,
     `Fairness inom tolerans: ${report.validations.fairnessWithinTolerance ? 'pass' : 'fail'}`,
+    `Scenariots fairnessförväntan: ${report.validations.scenarioFairnessExpectationMet ? 'pass' : 'fail'}`,
     `Rekommendation rimlig lokalt: ${report.validations.recommendationLooksReasonable ? 'pass' : 'fail'}`,
   ].join(' | ')
   const boundaryEventSummary = report.eventLog
@@ -874,12 +1274,12 @@ function buildAiValidationInput(report: Omit<LiveScenarioReport, 'ai'>): AiValid
     .join(' | ')
   const goalkeeperPenaltySummary = report.eventLog.some((event) => event.goalkeeperPenaltyApplied)
     ? report.eventLog
-        .filter((event) => event.goalkeeperPenaltyApplied)
-        .map(
-          (event) =>
-            `${event.replacementPlayerName} fick MV-penalty (${formatMinuteQuantity(event.futureGoalkeeperMinutes)} framtida MV-min)`,
-        )
-        .join(' | ')
+      .filter((event) => event.goalkeeperPenaltyApplied)
+      .map(
+        (event) =>
+          `${event.replacementPlayerName} fick MV-penalty (${formatMinuteQuantity(event.futureGoalkeeperMinutes)} framtida MV-min)`,
+      )
+      .join(' | ')
     : 'Ingen MV-penalty användes.'
   const unavailableAtFullTime = formatUnavailablePlayersAtFullTime(report)
   const finalPlanSummary = [
@@ -989,7 +1389,33 @@ function formatScenarioEventNarrative({
     return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} tillbaka, ${replacementName} ut på ${position} (rek #${recommendationRank}/${recommendationPoolSize}, byteblock ${chunkWindowIndex}${boundaryNote}${goalkeeperNote}).`
   }
 
+  if (type === 'injury') {
+    return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} skadad, ${replacementName} in på ${position} (rek #${recommendationRank}/${recommendationPoolSize}, byteblock ${chunkWindowIndex}${boundaryNote}${goalkeeperNote}).`
+  }
+
   return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} tillfälligt ute, ${replacementName} in på ${position} (rek #${recommendationRank}/${recommendationPoolSize}, byteblock ${chunkWindowIndex}${boundaryNote}${goalkeeperNote}).`
+}
+
+function formatNoRecommendationNarrative({
+  minute,
+  period,
+  playerName,
+  type,
+}: {
+  minute: number
+  period: number
+  playerName: string
+  type: ScenarioStep['type']
+}) {
+  if (type === 'return') {
+    return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} vill tillbaka, men ingen aktiv utespelare kan bytas ut just nu.`
+  }
+
+  if (type === 'injury') {
+    return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} skadad, men ingen ersättare tillgänglig.`
+  }
+
+  return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} tillfälligt ute, men ingen ersättare tillgänglig.`
 }
 
 function isReplacementFromExpectedPool(
@@ -997,7 +1423,7 @@ function isReplacementFromExpectedPool(
   chunk: ChunkPlan,
   replacementPlayerId: string,
 ) {
-  return type === 'temporary-out'
+  return type === 'injury' || type === 'temporary-out'
     ? !chunk.activePlayerIds.includes(replacementPlayerId)
     : Object.values(chunk.lineup).includes(replacementPlayerId)
 }
@@ -1045,6 +1471,16 @@ function getDefaultOutfieldPlayerId(chunk: ChunkPlan, plan: MatchPlan) {
   throw new Error('Hittade ingen aktiv utespelare i byteblocket.')
 }
 
+function getDefaultOutfieldPosition(chunk: ChunkPlan, plan: MatchPlan) {
+  for (const position of plan.positions) {
+    if (chunk.lineup[position]) {
+      return position
+    }
+  }
+
+  throw new Error('Hittade ingen aktiv utespelarposition i byteblocket.')
+}
+
 function isPlayerActiveFromMinute(plan: MatchPlan, period: number, minute: number, playerId: string) {
   return plan.periods
     .flatMap((currentPeriod) => currentPeriod.chunks)
@@ -1088,7 +1524,7 @@ function markUnresolvedTemporaryOuts(eventLog: LiveScenarioEventLogEntry[]) {
   for (let index = 0; index < eventLog.length; index += 1) {
     const event = eventLog[index]
 
-    if (event.type === 'temporary-out') {
+    if (event.eventApplied && (event.type === 'injury' || event.type === 'temporary-out')) {
       unresolvedByPlayerId.set(event.playerId, index)
       continue
     }
