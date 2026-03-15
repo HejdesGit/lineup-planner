@@ -71,3 +71,17 @@ export default defineConfig([
   },
 ])
 ```
+
+## GitHub Pages
+
+Projektet är konfigurerat för deploy till GitHub Pages via GitHub Actions.
+
+1. Pusha repot till GitHub.
+2. Gå till repository `Settings > Pages`.
+3. Sätt `Source` till `GitHub Actions`.
+4. Pusha till `main` eller kör workflowen manuellt under `Actions`.
+
+`vite.config.ts` sätter automatiskt rätt `base`-path på GitHub Actions:
+
+- `https://<user>.github.io/<repo>/` för vanliga repos
+- `https://<user>.github.io/` om repot heter `<user>.github.io`
