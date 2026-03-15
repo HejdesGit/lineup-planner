@@ -9,8 +9,8 @@ import type {
   ChunkPlan,
   FormationKey,
   LiveAvailabilityState,
+  LiveRecommendationPosition,
   MatchPlan,
-  OutfieldPosition,
   Player,
   PlayerAvailabilityStatus,
 } from './types'
@@ -134,7 +134,7 @@ export interface LiveScenarioEventLogEntry {
   playerId: string
   playerName: string
   poolType: 'bench' | 'active-outfield' | 'none'
-  position: OutfieldPosition
+  position: LiveRecommendationPosition
   recommendationPoolSize: number
   recommendationRank: number
   recommendationReason: string
@@ -1374,7 +1374,7 @@ function formatScenarioEventNarrative({
   minute: number
   period: number
   playerName: string
-  position: OutfieldPosition
+  position: LiveRecommendationPosition
   recommendationPoolSize: number
   recommendationRank: number
   replacementName: string

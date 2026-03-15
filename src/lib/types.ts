@@ -28,11 +28,13 @@ export type OutfieldPosition = (typeof ALL_POSITIONS)[number]
 export type RoleGroup = (typeof ROLE_GROUPS)[OutfieldPosition]
 export type Lineup = Partial<Record<OutfieldPosition, string>>
 export type GoalkeeperSelections = [string, string, string]
+export type LiveRecommendationPosition = OutfieldPosition | 'MV'
+export type LiveAdjustmentRole = 'goalkeeper' | 'outfield'
 
 export interface ChunkSubstitution {
   playerInId: string
   playerOutId: string
-  position: OutfieldPosition
+  position: LiveRecommendationPosition
 }
 
 export type PlayerAvailabilityStatus = 'available' | 'injured' | 'temporarily-out'
@@ -44,6 +46,7 @@ export interface LiveAdjustmentEvent {
   minute: number
   playerId: string
   replacementPlayerId: string
+  role?: LiveAdjustmentRole
   status?: Exclude<PlayerAvailabilityStatus, 'available'>
 }
 
@@ -51,7 +54,7 @@ export type LiveAvailabilityState = Record<string, PlayerAvailabilityStatus>
 
 export interface LiveRecommendation {
   playerId: string
-  position: OutfieldPosition
+  position: LiveRecommendationPosition
   score: number
   reason: string
   fairnessGap: number

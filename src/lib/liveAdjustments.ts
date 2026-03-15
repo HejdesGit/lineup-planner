@@ -8,6 +8,7 @@ import {
   type ChunkSubstitution,
   type Lineup,
   type LiveAdjustmentEvent,
+  type LiveAdjustmentRole,
   type LiveAvailabilityState,
   type LiveRecommendation,
   type MatchPlan,
@@ -157,6 +158,7 @@ export function getLiveRecommendations({
   minute,
   playerId,
   type,
+  role,
   limit = 3,
 }: {
   plan: MatchPlan
@@ -165,6 +167,7 @@ export function getLiveRecommendations({
   minute: number
   playerId: string
   type: LiveAdjustmentEvent['type']
+  role?: LiveAdjustmentRole
   limit?: number
 }): LiveRecommendation[] {
   const context = buildEventContext({ plan, period: period, minute })
@@ -174,9 +177,77 @@ export function getLiveRecommendations({
   const phase: RotationPhase = context.hasStartedCurrentPeriod ? 'in-period' : 'period-start'
 
   if (type === 'injury' || type === 'temporary-out') {
+    const playerRole = resolveLiveAdjustmentRole({
+      currentChunk: context.currentChunk,
+      event: {
+        type,
+        playerId,
+        replacementPlayerId: playerId,
+        role,
+      },
+    })
     const position = findOutfieldPosition(context.currentChunk.lineup, playerId)
 
-    if (!position || context.currentChunk.goalkeeperId === playerId) {
+    if (!playerRole) {
+      return []
+    }
+
+    if (playerRole === 'goalkeeper') {
+      return getAvailableBenchPlayerIds({
+        chunk: context.currentChunk,
+        availability,
+        playerIds: context.playerIds,
+      })
+        .map((candidateId) => {
+          const history = context.histories[candidateId]
+          const fairnessGap = Math.max(getFairnessTargets(plan)[candidateId] - history.actualMinutes, 0)
+          const benchPriority =
+            history.benchStreak * TEMPORARY_OUT_BENCH_STREAK_WEIGHT -
+            history.actualMinutes * TEMPORARY_OUT_ACTUAL_MINUTES_WEIGHT
+          const futureGoalkeeperMinutes = getRemainingGoalkeeperMinutes({
+            plan,
+            playerId: candidateId,
+            period,
+            minute,
+          })
+          const goalkeeperPenalty =
+            futureGoalkeeperMinutes > ROUNDING_EPSILON
+              ? TEMPORARY_OUT_GOALKEEPER_BASE_PENALTY +
+                futureGoalkeeperMinutes * TEMPORARY_OUT_GOALKEEPER_MINUTE_WEIGHT
+              : 0
+          const score =
+            fairnessGap * TEMPORARY_OUT_FAIRNESS_WEIGHT + benchPriority - goalkeeperPenalty
+          const goalkeeperPenaltyApplied = goalkeeperPenalty > ROUNDING_EPSILON
+
+          return {
+            playerId: candidateId,
+            position: 'MV',
+            score,
+            fairnessGap: roundMinuteValue(fairnessGap),
+            benchPriority: roundMinuteValue(benchPriority),
+            rotationPenalty: 0,
+            goalkeeperPenalty: roundMinuteValue(goalkeeperPenalty),
+            goalkeeperPenaltyApplied,
+            futureGoalkeeperMinutes: roundMinuteValue(futureGoalkeeperMinutes),
+            reason:
+              goalkeeperPenaltyApplied
+                ? 'Kan ta målet direkt, men har också framtida MV-tid som väger ned valet.'
+                : history.benchStreak > 0
+                  ? 'Har väntat längst och kan ta målvakten direkt.'
+                  : 'Ligger efter i speltid och kan ta målvakten direkt.',
+          } satisfies LiveRecommendation
+        })
+        .sort((left, right) => {
+          if (right.score !== left.score) {
+            return right.score - left.score
+          }
+
+          return playerOrderById[left.playerId] - playerOrderById[right.playerId]
+        })
+        .slice(0, limit)
+    }
+
+    if (!position) {
       return []
     }
 
@@ -240,6 +311,42 @@ export function getLiveRecommendations({
   }
 
   if (type === 'return' && availability[playerId] !== 'available') {
+    const playerRole = resolveLiveAdjustmentRole({
+      currentChunk: context.currentChunk,
+      event: {
+        type,
+        playerId,
+        replacementPlayerId: context.currentChunk.goalkeeperId,
+        role,
+      },
+    })
+
+    if (playerRole === 'goalkeeper') {
+      const currentGoalkeeperId = context.currentChunk.goalkeeperId
+      const currentHistory = context.histories[currentGoalkeeperId]
+      const overTarget = currentHistory.actualMinutes - getFairnessTargets(plan)[currentGoalkeeperId]
+      const score =
+        overTarget * 16 + currentHistory.playStreak * 18 + currentHistory.actualMinutes * 0.25
+
+      return [
+        {
+          playerId: currentGoalkeeperId,
+          position: 'MV',
+          score,
+          fairnessGap: roundMinuteValue(overTarget),
+          benchPriority: 0,
+          rotationPenalty: 0,
+          goalkeeperPenalty: 0,
+          goalkeeperPenaltyApplied: false,
+          futureGoalkeeperMinutes: 0,
+          reason:
+            overTarget > 0
+              ? 'Har redan fått mer speltid och frigör snabbast målvaktsplatsen.'
+              : 'Ger snabbast väg tillbaka i mål.',
+        } satisfies LiveRecommendation,
+      ]
+    }
+
     return getActiveOutfieldPlayerIds(context.currentChunk)
       .filter((candidateId) => candidateId !== playerId)
       .map((candidateId): LiveRecommendation | null => {
@@ -307,26 +414,33 @@ export function replanMatchFromLiveEvent({
     period: event.period,
     minute: event.minute,
   })
+  const eventRole = resolveLiveAdjustmentRole({
+    currentChunk: context.currentChunk,
+    event,
+  })
   const nextAvailability = {
     ...availability,
     [event.playerId]: event.type === 'return' ? 'available' : event.status ?? 'temporarily-out',
   } as LiveAvailabilityState
 
   const currentPosition =
-    event.type === 'return'
-      ? findOutfieldPosition(context.currentChunk.lineup, event.replacementPlayerId)
-      : findOutfieldPosition(context.currentChunk.lineup, event.playerId)
+    eventRole === 'goalkeeper'
+      ? null
+      : event.type === 'return'
+        ? findOutfieldPosition(context.currentChunk.lineup, event.replacementPlayerId)
+        : findOutfieldPosition(context.currentChunk.lineup, event.playerId)
+  const outfieldPosition = currentPosition ?? undefined
 
-  if (!currentPosition) {
+  if (!eventRole) {
+    throw new Error('Spelaren finns inte i det aktiva byteblocket.')
+  }
+
+  if (eventRole === 'outfield' && !outfieldPosition) {
     throw new Error('Spelaren är inte aktiv som utespelare i det här byteblocket.')
   }
 
   if (event.type === 'return' && availability[event.playerId] === 'available') {
     throw new Error('Spelaren är redan tillgänglig.')
-  }
-
-  if (event.type !== 'return' && context.currentChunk.goalkeeperId === event.playerId) {
-    throw new Error('Målvaktsskador stöds inte i den här versionen.')
   }
 
   const periodIndex = event.period - 1
@@ -342,8 +456,13 @@ export function replanMatchFromLiveEvent({
     currentPeriodIndex: periodIndex,
     playerIds: allPlayerIds,
   })
+  if (eventRole === 'goalkeeper') {
+    adjustedGoalkeepers[periodIndex] =
+      event.type === 'return' ? event.playerId : event.replacementPlayerId
+  }
   validateEventReplacement({
     event,
+    eventRole,
     availability,
     currentChunk: context.currentChunk,
     playerIds: allPlayerIds,
@@ -354,23 +473,38 @@ export function replanMatchFromLiveEvent({
   let currentPeriodStarted = context.hasStartedCurrentPeriod
 
   if (currentRemainderDuration > ROUNDING_EPSILON) {
-    const forcedLineup = {
-      ...context.currentChunk.lineup,
-      [currentPosition]:
-        event.type === 'return' ? event.playerId : event.replacementPlayerId,
-    } satisfies Lineup
-    const substitution: ChunkSubstitution =
-      event.type === 'return'
-        ? {
-            playerInId: event.playerId,
-            playerOutId: event.replacementPlayerId,
-            position: currentPosition,
-          }
+    const forcedLineup: Lineup =
+      eventRole === 'goalkeeper'
+        ? context.currentChunk.lineup
         : {
-            playerInId: event.replacementPlayerId,
-            playerOutId: event.playerId,
-            position: currentPosition,
+            ...context.currentChunk.lineup,
+            [outfieldPosition as OutfieldPosition]:
+              event.type === 'return' ? event.playerId : event.replacementPlayerId,
           }
+    const substitution: ChunkSubstitution =
+      eventRole === 'goalkeeper'
+        ? event.type === 'return'
+          ? {
+              playerInId: event.playerId,
+              playerOutId: event.replacementPlayerId,
+              position: 'MV',
+            }
+          : {
+              playerInId: event.replacementPlayerId,
+              playerOutId: event.playerId,
+              position: 'MV',
+            }
+        : event.type === 'return'
+          ? {
+              playerInId: event.playerId,
+              playerOutId: event.replacementPlayerId,
+              position: outfieldPosition as OutfieldPosition,
+            }
+          : {
+              playerInId: event.replacementPlayerId,
+              playerOutId: event.playerId,
+              position: outfieldPosition as OutfieldPosition,
+            }
     const remainderChunk = createChunk({
       template: {
         chunkIndex: context.currentChunk.chunkIndex,
@@ -381,7 +515,12 @@ export function replanMatchFromLiveEvent({
         durationMinutes: currentRemainderDuration,
       },
       lineup: forcedLineup,
-      goalkeeperId: context.currentChunk.goalkeeperId,
+      goalkeeperId:
+        eventRole === 'goalkeeper'
+          ? event.type === 'return'
+            ? event.playerId
+            : event.replacementPlayerId
+          : context.currentChunk.goalkeeperId,
       allPlayerIds,
       nameById,
       availability: nextAvailability,
@@ -639,11 +778,13 @@ function buildEventContext({
 
 function validateEventReplacement({
   event,
+  eventRole,
   availability,
   currentChunk,
   playerIds,
 }: {
   event: LiveAdjustmentEvent
+  eventRole: LiveAdjustmentRole
   availability: LiveAvailabilityState
   currentChunk: ChunkPlan
   playerIds: string[]
@@ -653,6 +794,14 @@ function validateEventReplacement({
   }
 
   if (event.type === 'return') {
+    if (eventRole === 'goalkeeper') {
+      if (currentChunk.goalkeeperId !== event.replacementPlayerId) {
+        throw new Error('Välj den aktiva målvakten att byta ut.')
+      }
+
+      return
+    }
+
     if (!getActiveOutfieldPlayerIds(currentChunk).includes(event.replacementPlayerId)) {
       throw new Error('Välj en aktiv utespelare att byta ut.')
     }
@@ -1457,6 +1606,28 @@ function getRemainingGoalkeeperMinutes({
       )
       .reduce((total, chunk) => total + chunk.durationMinutes, 0),
   )
+}
+
+function resolveLiveAdjustmentRole({
+  currentChunk,
+  event,
+}: {
+  currentChunk: ChunkPlan
+  event: Pick<LiveAdjustmentEvent, 'type' | 'playerId' | 'replacementPlayerId' | 'role'>
+}) {
+  if (event.role) {
+    return event.role
+  }
+
+  if (event.type === 'return') {
+    return currentChunk.goalkeeperId === event.replacementPlayerId ? 'goalkeeper' : 'outfield'
+  }
+
+  if (currentChunk.goalkeeperId === event.playerId) {
+    return 'goalkeeper'
+  }
+
+  return findOutfieldPosition(currentChunk.lineup, event.playerId) ? 'outfield' : null
 }
 
 function findOutfieldPosition(lineup: Lineup, playerId: string) {

@@ -271,6 +271,12 @@ describe('generateMatchPlan', () => {
         }
 
         for (const substitution of nextChunk.substitutions) {
+          if (substitution.position === 'MV') {
+            expect(previousChunk.goalkeeperId).toBe(substitution.playerOutId)
+            expect(nextChunk.goalkeeperId).toBe(substitution.playerInId)
+            continue
+          }
+
           expect(previousChunk.lineup[substitution.position]).toBe(substitution.playerOutId)
           expect(nextChunk.lineup[substitution.position]).toBe(substitution.playerInId)
         }

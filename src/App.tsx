@@ -80,6 +80,7 @@ import {
   type GoalkeeperSelections,
   type Lineup,
   type LiveAdjustmentEvent,
+  type LiveAdjustmentRole,
   type LiveAvailabilityState,
   type LiveRecommendation,
   type MatchPlan,
@@ -185,12 +186,14 @@ type LiveEventDraft =
   | {
       type: 'unavailable'
       playerId: string
+      role: LiveAdjustmentRole
       recommendations: LiveRecommendation[]
       selectedReplacementPlayerId: string | null
     }
   | {
       type: 'return'
       playerId: string
+      role: LiveAdjustmentRole
       recommendations: LiveRecommendation[]
       selectedReplacementPlayerId: string | null
     }
@@ -263,6 +266,20 @@ function App() {
   )
   const displayPlan = livePlanState?.plan ?? overridePlan
   const liveAvailability = livePlanState?.availability ?? (plan ? createInitialAvailabilityState(plan) : null)
+  const unavailableRoleById = useMemo(() => {
+    const nextRoles: Record<string, LiveAdjustmentRole> = {}
+
+    for (const event of liveEvents) {
+      if (event.type === 'return') {
+        delete nextRoles[event.playerId]
+        continue
+      }
+
+      nextRoles[event.playerId] = event.role ?? 'outfield'
+    }
+
+    return nextRoles
+  }, [liveEvents])
 
   const playerNameById = displayPlan
     ? Object.fromEntries(displayPlan.summaries.map((summary) => [summary.playerId, summary.name]))
@@ -478,10 +495,12 @@ function App() {
   const handleApplyLiveEvent = ({
     playerId,
     replacementPlayerId,
+    role,
     status,
   }: {
     playerId: string
     replacementPlayerId: string
+    role: LiveAdjustmentRole
     status: 'temporarily-out' | 'return'
   }) => {
     if (!displayPlan || !liveAvailability || !matchTimeline || !activeMatchTimer) {
@@ -511,6 +530,7 @@ function App() {
               minute,
               playerId,
               replacementPlayerId,
+              role,
             }
           : {
               type: 'temporary-out',
@@ -518,6 +538,7 @@ function App() {
               minute,
               playerId,
               replacementPlayerId,
+              role,
               status: 'temporarily-out',
             }
 
@@ -601,6 +622,7 @@ function App() {
                     matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
                   }
                   periodState={getPeriodState(period.period, matchProgress)}
+                  unavailableRoleById={unavailableRoleById}
                   onApplyLiveEvent={handleApplyLiveEvent}
                   onSwapSlots={(sourceSlot, targetSlot) => {
                     setShouldSyncShareUrl(true)
@@ -1370,6 +1392,7 @@ function PeriodCard({
   activeMinute,
   activeChunkIndex,
   periodState,
+  unavailableRoleById,
 }: {
   plan: MatchPlan
   period: PeriodPlan
@@ -1380,6 +1403,7 @@ function PeriodCard({
   onApplyLiveEvent: (event: {
     playerId: string
     replacementPlayerId: string
+    role: LiveAdjustmentRole
     status: 'temporarily-out' | 'return'
   }) => void
   defaultLockedSlots: BoardSlotId[]
@@ -1387,6 +1411,7 @@ function PeriodCard({
   activeMinute: number | null
   activeChunkIndex: number | null
   periodState: 'upcoming' | 'active' | 'completed'
+  unavailableRoleById: Record<string, LiveAdjustmentRole>
 }) {
   const [manualLockedSlots, setManualLockedSlots] = useState<BoardSlotId[]>([])
   const [dismissedDefaultLockedSlots, setDismissedDefaultLockedSlots] = useState<BoardSlotId[]>([])
@@ -1464,6 +1489,7 @@ function PeriodCard({
       return null
     }
 
+    const role: LiveAdjustmentRole = activeChunk?.goalkeeperId === playerId ? 'goalkeeper' : 'outfield'
     const recommendations = getLiveRecommendations({
       plan,
       availability,
@@ -1471,11 +1497,13 @@ function PeriodCard({
       minute: activeMinute,
       playerId,
       type: 'temporary-out',
+      role,
     })
 
     return {
       type: 'unavailable',
       playerId,
+      role,
       recommendations,
       selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
     }
@@ -1486,6 +1514,7 @@ function PeriodCard({
       return null
     }
 
+    const role = unavailableRoleById[playerId] ?? 'outfield'
     const recommendations = getLiveRecommendations({
       plan,
       availability,
@@ -1493,11 +1522,13 @@ function PeriodCard({
       minute: activeMinute,
       playerId,
       type: 'return',
+      role,
     })
 
     return {
       type: 'return',
       playerId,
+      role,
       recommendations,
       selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
     }
@@ -1542,6 +1573,7 @@ function PeriodCard({
     onApplyLiveEvent({
       playerId: liveDraft.playerId,
       replacementPlayerId: liveDraft.selectedReplacementPlayerId,
+      role: liveDraft.role,
       status: liveDraft.type === 'return' ? 'return' : 'temporarily-out',
     })
     setLiveDraft(null)
@@ -1619,6 +1651,7 @@ function PeriodCard({
           <LiveFormationBoard
             formation={period.formation}
             lineup={activeChunk.lineup}
+            goalkeeperId={activeChunk.goalkeeperId}
             nameById={nameById}
             onMarkUnavailable={(playerId) => {
               const nextDraft = createUnavailableDraft(playerId)
@@ -2009,11 +2042,13 @@ function FormationBoard({
 function LiveFormationBoard({
   formation,
   lineup,
+  goalkeeperId,
   nameById,
   onMarkUnavailable,
 }: {
   formation: FormationKey
   lineup: Lineup
+  goalkeeperId: string
   nameById: Record<string, string>
   onMarkUnavailable: (playerId: string) => void
 }) {
@@ -2038,6 +2073,14 @@ function LiveFormationBoard({
             })}
           </div>
         ))}
+        <div className="mx-auto mt-1.5 flex max-w-32 justify-center border-t border-dashed border-white/10 pt-3">
+          <LivePositionBadge
+            label="MV"
+            player={nameById[goalkeeperId] ?? '-'}
+            tone="gk"
+            onMarkUnavailable={() => onMarkUnavailable(goalkeeperId)}
+          />
+        </div>
       </div>
     </div>
   )
@@ -2051,13 +2094,14 @@ function LivePositionBadge({
 }: {
   label: string
   player: string
-  tone: 'def' | 'mid' | 'att'
+  tone: 'def' | 'mid' | 'att' | 'gk'
   onMarkUnavailable?: () => void
 }) {
   const toneClasses = {
     def: 'border-sky-300/35 bg-[linear-gradient(180deg,rgba(56,189,248,0.18),rgba(12,74,110,0.28))] text-sky-50',
     mid: 'border-emerald-300/35 bg-[linear-gradient(180deg,rgba(74,222,128,0.18),rgba(6,78,59,0.28))] text-emerald-50',
     att: 'border-rose-300/35 bg-[linear-gradient(180deg,rgba(251,113,133,0.18),rgba(127,29,29,0.28))] text-rose-50',
+    gk: 'border-clay-300/35 bg-[linear-gradient(180deg,rgba(251,191,36,0.18),rgba(120,53,15,0.28))] text-amber-50',
   }
 
   return (

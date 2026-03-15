@@ -681,6 +681,46 @@ describe('App', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('allows the live goalkeeper to be temporarily out and return immediately', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!activePeriodCard) {
+      throw new Error('Aktivt periodkort saknas i testet.')
+    }
+
+    const goalkeeperButton = within(activePeriodCard).getByRole('button', {
+      name: /markera ada som tillfälligt ute/i,
+    })
+
+    await user.click(goalkeeperButton)
+
+    expect(within(activePeriodCard).getByText(/ada är tillfälligt ute/i)).toBeInTheDocument()
+    expect(within(activePeriodCard).getByText(/resten av matchen räknas om direkt/i)).toBeInTheDocument()
+
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    const returnButton = within(activePeriodCard).getByRole('button', {
+      name: /ada.*klar för spel/i,
+    })
+    expect(returnButton).toBeInTheDocument()
+
+    await user.click(returnButton)
+
+    expect(within(activePeriodCard).getByText(/ada är klar för spel/i)).toBeInTheDocument()
+
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    expect(
+      within(activePeriodCard).queryByRole('button', {
+        name: /ada.*klar för spel/i,
+      }),
+    ).not.toBeInTheDocument()
+  })
+
   it('persists live temporarily-out events in the running timer snapshot and restores them after reload', async () => {
     const user = userEvent.setup()
     render(<App />)

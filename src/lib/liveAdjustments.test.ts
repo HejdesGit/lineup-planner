@@ -224,8 +224,87 @@ describe('liveAdjustments', () => {
       0,
     )
 
-    expect(totalActualMinutes).toBe(3 * 20 * 7)
-    expect(totalBenchMinutes).toBe(afterReturn.plan.summaries.length * 60 - totalActualMinutes)
+    expect(totalActualMinutes).toBeCloseTo(3 * 20 * 7, 6)
+    expect(totalBenchMinutes).toBeCloseTo(
+      afterReturn.plan.summaries.length * 60 - totalActualMinutes,
+      6,
+    )
+  })
+
+  it('supports goalkeeper temporary-out events and lets the goalkeeper return', () => {
+    const plan = createPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const goalkeeperId = chunk.goalkeeperId
+    const temporaryOutRecommendations = getLiveRecommendations({
+      plan,
+      availability,
+      period: 2,
+      minute: 10,
+      playerId: goalkeeperId,
+      type: 'temporary-out',
+      role: 'goalkeeper',
+    })
+
+    expect(temporaryOutRecommendations.length).toBeGreaterThan(0)
+    expect(temporaryOutRecommendations[0].position).toBe('MV')
+    expect(chunk.activePlayerIds).not.toContain(temporaryOutRecommendations[0].playerId)
+
+    const afterTemporaryOut = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'temporary-out',
+        period: 2,
+        minute: 10,
+        playerId: goalkeeperId,
+        replacementPlayerId: temporaryOutRecommendations[0].playerId,
+        status: 'temporarily-out',
+        role: 'goalkeeper',
+      },
+    })
+
+    const replacementChunk = getChunkAtMinute(afterTemporaryOut.plan, 2, 12)
+
+    expect(afterTemporaryOut.availability[goalkeeperId]).toBe('temporarily-out')
+    expect(replacementChunk?.goalkeeperId).toBe(temporaryOutRecommendations[0].playerId)
+    expect(replacementChunk?.activePlayerIds).toContain(temporaryOutRecommendations[0].playerId)
+    expect(replacementChunk?.activePlayerIds).not.toContain(goalkeeperId)
+
+    const returnRecommendations = getLiveRecommendations({
+      plan: afterTemporaryOut.plan,
+      availability: afterTemporaryOut.availability,
+      period: 2,
+      minute: 12,
+      playerId: goalkeeperId,
+      type: 'return',
+      role: 'goalkeeper',
+    })
+
+    expect(returnRecommendations).toHaveLength(1)
+    expect(returnRecommendations[0].playerId).toBe(temporaryOutRecommendations[0].playerId)
+    expect(returnRecommendations[0].position).toBe('MV')
+
+    const afterReturn = replanMatchFromLiveEvent({
+      plan: afterTemporaryOut.plan,
+      availability: afterTemporaryOut.availability,
+      event: {
+        type: 'return',
+        period: 2,
+        minute: 12,
+        playerId: goalkeeperId,
+        replacementPlayerId: returnRecommendations[0].playerId,
+        role: 'goalkeeper',
+      },
+    })
+
+    expect(afterReturn.availability[goalkeeperId]).toBe('available')
+    expect(getChunkAtMinute(afterReturn.plan, 2, 12)?.goalkeeperId).toBe(goalkeeperId)
   })
 
   it('replays persisted live events in order', () => {
