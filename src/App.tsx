@@ -58,6 +58,7 @@ import {
   buildMatchTimeline,
   createRunningMatchTimer,
   getMatchProgress,
+  getTimelineChunksForPeriod,
   isStoredActiveMatchTimerCompatible,
   parseStoredActiveMatchTimer,
   pauseMatchTimer,
@@ -118,6 +119,7 @@ const DEFAULT_PLAYER_INPUT = DEFAULT_NAMES.join('\n')
 const DEFAULT_FORMATION: FormationKey = '2-3-1'
 const DEFAULT_CHUNK_MINUTES = 10
 const DEFAULT_SHARE_SEED = 20260314
+const DEFAULT_SELECTED_TIMER_PERIOD = 1
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
 const SUBSTITUTIONS_PER_PERIOD_OPTIONS = [2, 3, 4] as const
 const SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES = {
@@ -166,6 +168,7 @@ interface InitialAppState {
   plan: MatchPlan | null
   periodOverrides: PeriodBoardOverrides
   shouldSyncShareUrl: boolean
+  selectedTimerPeriod: number
   activeMatchTimer: StoredActiveMatchTimer | null
 }
 
@@ -207,6 +210,7 @@ function App() {
   const [plan, setPlan] = useState<MatchPlan | null>(initialState.plan)
   const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
   const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
+  const [selectedTimerPeriod, setSelectedTimerPeriod] = useState(initialState.selectedTimerPeriod)
   const [activeMatchTimer, setActiveMatchTimer] = useState<StoredActiveMatchTimer | null>(
     initialState.activeMatchTimer,
   )
@@ -248,6 +252,8 @@ function App() {
         : null,
     [activeMatchTimer, matchTimeline, timerNow],
   )
+  const canSelectTimerPeriod =
+    Boolean(plan) && matchProgress?.status !== 'running' && matchProgress?.status !== 'paused'
 
   useEffect(() => {
     if (!plan || !shouldSyncShareUrl) {
@@ -276,6 +282,14 @@ function App() {
   }, [activeMatchTimer, matchTimeline])
 
   useEffect(() => {
+    if (!activeMatchTimer || activeMatchTimer.status !== 'running' || matchProgress?.status !== 'finished') {
+      return
+    }
+
+    setActiveMatchTimer(pauseMatchTimer(activeMatchTimer, Date.now()))
+  }, [activeMatchTimer, matchProgress])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -295,7 +309,7 @@ function App() {
         serializeStoredActiveMatchTimer({
           ...activeMatchTimer,
           lineupSnapshot,
-          matchDurationMs: matchTimeline.totalDurationMs,
+          periodDurationMs: matchTimeline.periodDurationMs,
         }),
       )
     } catch {
@@ -329,6 +343,7 @@ function App() {
         setPlan(nextPlan)
         setPeriodOverrides({})
         setShouldSyncShareUrl(true)
+        setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
         setActiveMatchTimer(null)
         setTimerNow(Date.now())
       })
@@ -341,6 +356,7 @@ function App() {
       setPlan(null)
       setPeriodOverrides({})
       setShouldSyncShareUrl(false)
+      setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
       setActiveMatchTimer(null)
       setTimerNow(Date.now())
     }
@@ -358,7 +374,8 @@ function App() {
       createRunningMatchTimer({
         lineupSnapshot,
         startedAt,
-        matchDurationMs: matchTimeline.totalDurationMs,
+        period: selectedTimerPeriod,
+        periodDurationMs: matchTimeline.periodDurationMs,
       }),
     )
   }
@@ -386,6 +403,19 @@ function App() {
   const handleResetMatchTimer = () => {
     setActiveMatchTimer(null)
     setTimerNow(Date.now())
+  }
+
+  const handleSelectTimerPeriod = (periodNumber: number) => {
+    if (!plan || periodNumber < 1 || periodNumber > plan.periods.length || !canSelectTimerPeriod) {
+      return
+    }
+
+    setSelectedTimerPeriod(periodNumber)
+
+    if (matchProgress?.status === 'finished') {
+      setActiveMatchTimer(null)
+      setTimerNow(Date.now())
+    }
   }
 
   const handleShareViaWhatsApp = () => {
@@ -427,10 +457,13 @@ function App() {
               playerNameById={playerNameById}
               matchProgress={matchProgress}
               matchTimeline={matchTimeline}
+              selectedTimerPeriod={selectedTimerPeriod}
+              canSelectTimerPeriod={canSelectTimerPeriod}
               onStartMatch={handleStartMatch}
               onPauseMatch={handlePauseMatch}
               onResumeMatch={handleResumeMatch}
               onResetMatch={handleResetMatchTimer}
+              onSelectTimerPeriod={handleSelectTimerPeriod}
             />
 
             <section className="grid gap-5 xl:grid-cols-3">
@@ -736,19 +769,25 @@ function MatchOverview({
   playerNameById,
   matchProgress,
   matchTimeline,
+  selectedTimerPeriod,
+  canSelectTimerPeriod,
   onStartMatch,
   onPauseMatch,
   onResumeMatch,
   onResetMatch,
+  onSelectTimerPeriod,
 }: {
   plan: MatchPlan
   playerNameById: Record<string, string>
   matchProgress: MatchProgress | null
   matchTimeline: MatchTimeline | null
+  selectedTimerPeriod: number
+  canSelectTimerPeriod: boolean
   onStartMatch: () => void
   onPauseMatch: () => void
   onResumeMatch: () => void
   onResetMatch: () => void
+  onSelectTimerPeriod: (periodNumber: number) => void
 }) {
   return (
     <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5 backdrop-blur">
@@ -785,10 +824,13 @@ function MatchOverview({
             plan={plan}
             matchProgress={matchProgress}
             matchTimeline={matchTimeline}
+            selectedTimerPeriod={selectedTimerPeriod}
+            canSelectTimerPeriod={canSelectTimerPeriod}
             onStartMatch={onStartMatch}
             onPauseMatch={onPauseMatch}
             onResumeMatch={onResumeMatch}
             onResetMatch={onResetMatch}
+            onSelectTimerPeriod={onSelectTimerPeriod}
           />
         ) : null}
       </div>
@@ -800,36 +842,43 @@ function MatchTimerPanel({
   plan,
   matchProgress,
   matchTimeline,
+  selectedTimerPeriod,
+  canSelectTimerPeriod,
   onStartMatch,
   onPauseMatch,
   onResumeMatch,
   onResetMatch,
+  onSelectTimerPeriod,
 }: {
   plan: MatchPlan
   matchProgress: MatchProgress
   matchTimeline: MatchTimeline
+  selectedTimerPeriod: number
+  canSelectTimerPeriod: boolean
   onStartMatch: () => void
   onPauseMatch: () => void
   onResumeMatch: () => void
   onResetMatch: () => void
+  onSelectTimerPeriod: (periodNumber: number) => void
 }) {
   const statusLabel = getMatchStatusLabel(matchProgress)
-  const statusSummary = getMatchProgressSummary(matchProgress)
+  const statusSummary = getMatchProgressSummary(matchProgress, selectedTimerPeriod)
+  const selectedPeriodChunks = getTimelineChunksForPeriod(matchTimeline, selectedTimerPeriod)
 
   return (
     <section className="overflow-hidden rounded-[1.5rem] border border-clay-300/20 bg-[radial-gradient(circle_at_top,_rgba(212,125,51,0.18),_transparent_42%),linear-gradient(180deg,rgba(36,20,13,0.92),rgba(16,10,7,0.96))] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.25)] sm:p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-clay-100/70">
-            Matchtimer
+            Periodtimer
           </p>
           <h3 className="mt-2 font-display text-4xl font-black text-white">
             {formatMatchClock(matchProgress.elapsedMs)}
           </h3>
           <p className="mt-2 text-sm text-stone-300">
             {matchProgress.status === 'finished'
-              ? 'Match slut'
-              : `${formatMatchClock(matchProgress.remainingMs)} kvar av ${formatMatchClock(matchTimeline.totalDurationMs)}`}
+              ? `Period ${matchProgress.activePeriod ?? selectedTimerPeriod} klar`
+              : `${formatMatchClock(matchProgress.remainingMs)} kvar av ${formatMatchClock(matchTimeline.periodDurationMs)}`}
           </p>
           <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-clay-100/70">
             {statusSummary}
@@ -854,11 +903,11 @@ function MatchTimerPanel({
         <div className="relative overflow-hidden rounded-[1.1rem] border border-white/10 bg-black/30 px-2 py-2.5">
           <div className="pointer-events-none absolute inset-y-0 left-0 rounded-[0.9rem] bg-[linear-gradient(90deg,rgba(212,125,51,0.72),rgba(251,191,36,0.55))] transition-[width] duration-700 ease-out" style={{ width: `${matchProgress.progress * 100}%` }} />
           <div className="pointer-events-none absolute inset-x-0 top-0 h-full">
-            {matchTimeline.chunks.slice(0, -1).map((chunk) => (
+            {selectedPeriodChunks.slice(0, -1).map((chunk) => (
               <span
-                key={`chunk-marker-${chunk.chunkIndex}`}
+                key={`chunk-marker-${chunk.period}-${chunk.chunkIndex}`}
                 className="absolute top-0 h-full w-px bg-white/12"
-                style={{ left: `${(chunk.endMs / matchTimeline.totalDurationMs) * 100}%` }}
+                style={{ left: `${(chunk.endMs / matchTimeline.periodDurationMs) * 100}%` }}
               />
             ))}
           </div>
@@ -866,22 +915,29 @@ function MatchTimerPanel({
             {Array.from({ length: plan.periods.length }, (_, index) => {
               const periodNumber = index + 1
               const periodState = getPeriodState(periodNumber, matchProgress)
+              const isSelectedTimerPeriod = selectedTimerPeriod === periodNumber
 
               return (
-                <div
+                <button
+                  type="button"
                   key={`timeline-period-${periodNumber}`}
-                  className={`rounded-[0.9rem] border px-3 py-2 ${periodState === 'active'
+                  onClick={() => onSelectTimerPeriod(periodNumber)}
+                  disabled={!canSelectTimerPeriod}
+                  aria-pressed={isSelectedTimerPeriod}
+                  className={`rounded-[0.9rem] border px-3 py-2 text-left transition ${periodState === 'active'
                       ? 'border-clay-200/40 bg-white/10'
                       : periodState === 'completed'
                         ? 'border-emerald-300/15 bg-emerald-400/5'
-                        : 'border-white/8 bg-black/10'
-                    }`}
+                        : isSelectedTimerPeriod
+                          ? 'border-clay-300/35 bg-clay-500/15'
+                          : 'border-white/8 bg-black/10'
+                    } ${canSelectTimerPeriod ? 'hover:border-clay-200/35 hover:bg-white/10' : 'cursor-default opacity-90'}`}
                 >
                   <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-stone-300/80">
                     Period {periodNumber}
                   </p>
                   <p className="mt-1 text-sm font-medium text-white">{plan.periodMinutes} min</p>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -889,13 +945,13 @@ function MatchTimerPanel({
       </div>
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-        {matchProgress.status === 'idle' ? (
+        {(matchProgress.status === 'idle' || matchProgress.status === 'finished') ? (
           <button
             type="button"
             onClick={onStartMatch}
             className="inline-flex h-11 items-center justify-center rounded-full bg-clay-400 px-5 font-display text-base font-bold text-clay-900 transition hover:bg-clay-300"
           >
-            Starta match
+            Starta period {selectedTimerPeriod}
           </button>
         ) : null}
         {matchProgress.status === 'running' ? (
@@ -904,7 +960,7 @@ function MatchTimerPanel({
             onClick={onPauseMatch}
             className="inline-flex h-11 items-center justify-center rounded-full bg-sky-300 px-5 font-display text-base font-bold text-sky-950 transition hover:bg-sky-200"
           >
-            Pause klockan
+            Pausa klockan
           </button>
         ) : null}
         {matchProgress.status === 'paused' ? (
@@ -913,7 +969,7 @@ function MatchTimerPanel({
             onClick={onResumeMatch}
             className="inline-flex h-11 items-center justify-center rounded-full bg-clay-400 px-5 font-display text-base font-bold text-clay-900 transition hover:bg-clay-300"
           >
-            Fortsätt match
+            Fortsätt period {matchProgress.activePeriod ?? selectedTimerPeriod}
           </button>
         ) : null}
         <button
@@ -958,7 +1014,7 @@ function FloatingMatchTimer({
             </p>
             <p className="mt-2 text-xs text-stone-300">
               {matchProgress.status === 'finished'
-                ? 'Full tid'
+                ? 'Period klar'
                 : `${formatMatchClock(matchProgress.remainingMs)} kvar`}
             </p>
           </div>
@@ -969,11 +1025,11 @@ function FloatingMatchTimer({
             onClick={onScrollToActiveSection}
             className="mt-3 text-left text-xs font-medium uppercase tracking-[0.18em] text-clay-100/75 transition hover:text-clay-50 focus:outline-none focus:ring-2 focus:ring-clay-300/30"
           >
-            {getMatchProgressSummary(matchProgress)}
+            {getMatchProgressSummary(matchProgress, matchProgress.activePeriod ?? DEFAULT_SELECTED_TIMER_PERIOD)}
           </button>
         ) : (
           <p className="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-clay-100/75">
-            {getMatchProgressSummary(matchProgress)}
+            {getMatchProgressSummary(matchProgress, matchProgress.activePeriod ?? DEFAULT_SELECTED_TIMER_PERIOD)}
           </p>
         )}
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -983,7 +1039,7 @@ function FloatingMatchTimer({
           />
         </div>
         <p className="mt-2 text-[11px] text-stone-400">
-          {formatMatchClock(matchTimeline.totalDurationMs)} total matchtid
+          {formatMatchClock(matchTimeline.periodDurationMs)} per period
         </p>
       </div>
     </aside>
@@ -2001,6 +2057,7 @@ function createInitialAppState(): InitialAppState {
       return {
         ...hydratedState,
         shouldSyncShareUrl: true,
+        selectedTimerPeriod: activeMatchTimer?.period ?? DEFAULT_SELECTED_TIMER_PERIOD,
         activeMatchTimer,
       }
     } catch {
@@ -2032,6 +2089,7 @@ function createInitialAppState(): InitialAppState {
     return {
       ...hydratedState,
       shouldSyncShareUrl: false,
+      selectedTimerPeriod: storedTimer.period,
       activeMatchTimer: storedTimer,
     }
   } catch {
@@ -2068,6 +2126,7 @@ function createDefaultAppState(): InitialAppState {
     plan: initialPlan,
     periodOverrides: {},
     shouldSyncShareUrl: false,
+    selectedTimerPeriod: DEFAULT_SELECTED_TIMER_PERIOD,
     activeMatchTimer: null,
   }
 }
@@ -2305,7 +2364,7 @@ function getPeriodState(
   periodNumber: number,
   matchProgress: MatchProgress | null,
 ): 'upcoming' | 'active' | 'completed' {
-  if (!matchProgress || matchProgress.status === 'idle') {
+  if (!matchProgress || matchProgress.status === 'idle' || matchProgress.activePeriod !== periodNumber) {
     return 'upcoming'
   }
 
@@ -2313,20 +2372,12 @@ function getPeriodState(
     return 'completed'
   }
 
-  if (matchProgress.activePeriod === periodNumber) {
-    return 'active'
-  }
-
-  if (matchProgress.activePeriod && periodNumber < matchProgress.activePeriod) {
-    return 'completed'
-  }
-
-  return 'upcoming'
+  return 'active'
 }
 
 function getMatchStatusLabel(matchProgress: MatchProgress) {
   if (matchProgress.status === 'finished') {
-    return 'Match slut'
+    return `Period ${matchProgress.activePeriod ?? DEFAULT_SELECTED_TIMER_PERIOD} klar`
   }
 
   if (matchProgress.status === 'paused') {
@@ -2340,9 +2391,9 @@ function getMatchStatusLabel(matchProgress: MatchProgress) {
   return 'Redo'
 }
 
-function getMatchProgressSummary(matchProgress: MatchProgress) {
+function getMatchProgressSummary(matchProgress: MatchProgress, selectedPeriod: number) {
   if (matchProgress.status === 'finished') {
-    return 'Alla byteblock avslutade'
+    return `Period ${matchProgress.activePeriod ?? selectedPeriod} avslutad`
   }
 
   const byteblockLabel =
@@ -2358,7 +2409,7 @@ function getMatchProgressSummary(matchProgress: MatchProgress) {
     return `Pågår i period ${matchProgress.activePeriod ?? 1} · ${byteblockLabel}`
   }
 
-  return 'Redo att starta'
+  return `Redo att starta period ${selectedPeriod}`
 }
 
 function getChunkState(

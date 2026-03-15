@@ -32,50 +32,57 @@ function createPlan() {
 
 describe('matchTimer', () => {
   it('builds idle progress before a match has started', () => {
-    expect(getIdleMatchProgress(3_600_000)).toEqual({
+    expect(getIdleMatchProgress(20 * 60_000)).toEqual({
       status: 'idle',
       elapsedMs: 0,
-      remainingMs: 3_600_000,
+      remainingMs: 20 * 60_000,
       progress: 0,
       activePeriod: null,
       activeChunkIndex: null,
     })
   })
 
-  it('maps elapsed time to the active period and byteblock', () => {
+  it('maps elapsed time to the active byteblock within the selected period', () => {
     const timeline = buildMatchTimeline(createPlan())
-    const baseTimer = createRunningMatchTimer({
+    const periodOneTimer = createRunningMatchTimer({
       lineupSnapshot: 'snapshot-token',
       startedAt: 1_000,
-      matchDurationMs: timeline.totalDurationMs,
+      period: 1,
+      periodDurationMs: timeline.periodDurationMs,
+    })
+    const periodTwoTimer = createRunningMatchTimer({
+      lineupSnapshot: 'snapshot-token',
+      startedAt: 1_000,
+      period: 2,
+      periodDurationMs: timeline.periodDurationMs,
     })
 
-    expect(getMatchProgress({ timeline, timer: baseTimer, now: 1_000 + 5 * 60_000 })).toMatchObject({
+    expect(getMatchProgress({ timeline, timer: periodOneTimer, now: 1_000 + 5 * 60_000 })).toMatchObject({
       status: 'running',
       elapsedMs: 5 * 60_000,
-      remainingMs: 55 * 60_000,
+      remainingMs: 15 * 60_000,
       activePeriod: 1,
       activeChunkIndex: 0,
     })
 
-    expect(getMatchProgress({ timeline, timer: baseTimer, now: 1_000 + 25 * 60_000 })).toMatchObject({
+    expect(getMatchProgress({ timeline, timer: periodOneTimer, now: 1_000 + 15 * 60_000 })).toMatchObject({
       status: 'running',
-      elapsedMs: 25 * 60_000,
-      remainingMs: 35 * 60_000,
-      activePeriod: 2,
-      activeChunkIndex: 0,
+      elapsedMs: 15 * 60_000,
+      remainingMs: 5 * 60_000,
+      activePeriod: 1,
+      activeChunkIndex: 1,
     })
 
-    expect(getMatchProgress({ timeline, timer: baseTimer, now: 1_000 + 59 * 60_000 })).toMatchObject({
+    expect(getMatchProgress({ timeline, timer: periodTwoTimer, now: 1_000 + 19 * 60_000 })).toMatchObject({
       status: 'running',
-      elapsedMs: 59 * 60_000,
+      elapsedMs: 19 * 60_000,
       remainingMs: 60_000,
-      activePeriod: 3,
+      activePeriod: 2,
       activeChunkIndex: 1,
     })
   })
 
-  it('clamps elapsed time before start and after full time', () => {
+  it('clamps elapsed time before start and after period full time', () => {
     const timeline = buildMatchTimeline(createPlan())
 
     expect(
@@ -84,14 +91,15 @@ describe('matchTimer', () => {
         timer: createRunningMatchTimer({
           lineupSnapshot: 'snapshot-token',
           startedAt: 10_000,
-          matchDurationMs: timeline.totalDurationMs,
+          period: 1,
+          periodDurationMs: timeline.periodDurationMs,
         }),
         now: 9_000,
       }),
     ).toMatchObject({
       status: 'running',
       elapsedMs: 0,
-      remainingMs: 60 * 60_000,
+      remainingMs: 20 * 60_000,
       activePeriod: 1,
       activeChunkIndex: 0,
     })
@@ -102,16 +110,17 @@ describe('matchTimer', () => {
         timer: createRunningMatchTimer({
           lineupSnapshot: 'snapshot-token',
           startedAt: 10_000,
-          matchDurationMs: timeline.totalDurationMs,
+          period: 1,
+          periodDurationMs: timeline.periodDurationMs,
         }),
         now: 10_000 + 90 * 60_000,
       }),
     ).toEqual({
       status: 'finished',
-      elapsedMs: 60 * 60_000,
+      elapsedMs: 20 * 60_000,
       remainingMs: 0,
       progress: 1,
-      activePeriod: null,
+      activePeriod: 1,
       activeChunkIndex: null,
     })
   })
@@ -121,24 +130,26 @@ describe('matchTimer', () => {
     const runningTimer = createRunningMatchTimer({
       lineupSnapshot: 'snapshot-token',
       startedAt: 1_000,
-      matchDurationMs: timeline.totalDurationMs,
+      period: 1,
+      periodDurationMs: timeline.periodDurationMs,
     })
 
     const pausedTimer = pauseMatchTimer(runningTimer, 1_000 + 12 * 60_000)
 
     expect(pausedTimer).toEqual({
-      version: 1,
+      version: 2,
       lineupSnapshot: 'snapshot-token',
       status: 'paused',
       startedAt: null,
       elapsedMs: 12 * 60_000,
-      matchDurationMs: timeline.totalDurationMs,
+      period: 1,
+      periodDurationMs: timeline.periodDurationMs,
     })
 
     expect(getMatchProgress({ timeline, timer: pausedTimer, now: 1_000 + 40 * 60_000 })).toMatchObject({
       status: 'paused',
       elapsedMs: 12 * 60_000,
-      remainingMs: 48 * 60_000,
+      remainingMs: 8 * 60_000,
       activePeriod: 1,
       activeChunkIndex: 1,
     })
@@ -148,7 +159,7 @@ describe('matchTimer', () => {
     expect(getMatchProgress({ timeline, timer: resumedTimer, now: 5_000 + 3 * 60_000 })).toMatchObject({
       status: 'running',
       elapsedMs: 15 * 60_000,
-      remainingMs: 45 * 60_000,
+      remainingMs: 5 * 60_000,
       activePeriod: 1,
       activeChunkIndex: 1,
     })
@@ -158,43 +169,49 @@ describe('matchTimer', () => {
     expect(
       parseStoredActiveMatchTimer(
         JSON.stringify({
-          version: 1,
+          version: 2,
           lineupSnapshot: 'snapshot-token',
+          status: 'running',
           startedAt: 12345,
-          matchDurationMs: 3_600_000,
+          elapsedMs: 0,
+          period: 2,
+          periodDurationMs: 1_200_000,
         }),
       ),
     ).toEqual({
-      version: 1,
+      version: 2,
       lineupSnapshot: 'snapshot-token',
       status: 'running',
       startedAt: 12345,
       elapsedMs: 0,
-      matchDurationMs: 3_600_000,
+      period: 2,
+      periodDurationMs: 1_200_000,
     })
 
     expect(
       parseStoredActiveMatchTimer(
         JSON.stringify({
-          version: 1,
+          version: 2,
           lineupSnapshot: 'snapshot-token',
           status: 'paused',
           startedAt: null,
           elapsedMs: 180000,
-          matchDurationMs: 3_600_000,
+          period: 3,
+          periodDurationMs: 1_200_000,
         }),
       ),
     ).toEqual({
-      version: 1,
+      version: 2,
       lineupSnapshot: 'snapshot-token',
       status: 'paused',
       startedAt: null,
       elapsedMs: 180000,
-      matchDurationMs: 3_600_000,
+      period: 3,
+      periodDurationMs: 1_200_000,
     })
 
     expect(parseStoredActiveMatchTimer('{"version":2}')).toBeNull()
-    expect(parseStoredActiveMatchTimer('{"version":1,"lineupSnapshot":"","startedAt":1,"matchDurationMs":1}')).toBeNull()
+    expect(parseStoredActiveMatchTimer('{"version":1,"lineupSnapshot":"snapshot-token","startedAt":1,"matchDurationMs":1}')).toBeNull()
     expect(parseStoredActiveMatchTimer('not-json')).toBeNull()
   })
 
@@ -204,12 +221,13 @@ describe('matchTimer', () => {
     expect(
       isStoredActiveMatchTimerCompatible(
         {
-          version: 1,
+          version: 2,
           lineupSnapshot: 'snapshot-token',
           status: 'running',
           startedAt: 12345,
           elapsedMs: 0,
-          matchDurationMs: timeline.totalDurationMs,
+          period: 2,
+          periodDurationMs: timeline.periodDurationMs,
         },
         timeline,
       ),
@@ -218,12 +236,13 @@ describe('matchTimer', () => {
     expect(
       isStoredActiveMatchTimerCompatible(
         {
-          version: 1,
+          version: 2,
           lineupSnapshot: 'snapshot-token',
           status: 'paused',
           startedAt: null,
           elapsedMs: 180000,
-          matchDurationMs: 999,
+          period: 2,
+          periodDurationMs: 999,
         },
         timeline,
       ),

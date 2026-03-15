@@ -331,21 +331,22 @@ describe('App', () => {
     expect(screen.getByDisplayValue('2-3-1')).toBeInTheDocument()
   })
 
-  it('stores an active timer from the current match snapshot', async () => {
+  it('stores an active timer from the current period snapshot', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     expect(getStoredMatchTimer()).toEqual({
-      version: 1,
+      version: 2,
       lineupSnapshot: expect.any(String),
       status: 'running',
       startedAt: Date.now(),
       elapsedMs: 0,
-      matchDurationMs: 60 * 60_000,
+      period: 1,
+      periodDurationMs: 20 * 60_000,
     })
   })
 
@@ -354,7 +355,7 @@ describe('App', () => {
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     act(() => {
       vi.advanceTimersByTime(3 * 60_000)
@@ -365,8 +366,8 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getAllByText('3:00').length).toBeGreaterThan(1)
-    expect(screen.getByText(/57:00 kvar av 60:00/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /starta match/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/17:00 kvar av 20:00/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /starta period/i })).not.toBeInTheDocument()
   })
 
   it('restores the persisted timer when the same lineup is present in the url on reload', async () => {
@@ -374,7 +375,7 @@ describe('App', () => {
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     act(() => {
       vi.advanceTimersByTime(4 * 60_000)
@@ -387,29 +388,34 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getAllByText('4:00').length).toBeGreaterThan(1)
-    expect(screen.getByText(/56:00 kvar av 60:00/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /starta match/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/16:00 kvar av 20:00/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /starta period/i })).not.toBeInTheDocument()
   })
 
-  it('marks the active period and byteblock from the elapsed match time', async () => {
+  it('starts the selected period and marks its active byteblock', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    const periodTwoButton = screen.getAllByRole('button', { name: /period 2/i })[0]
+    fireEvent.click(periodTwoButton)
+    expect(periodTwoButton).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 2/i }))
 
     act(() => {
-      vi.advanceTimersByTime(25 * 60_000)
+      vi.advanceTimersByTime(15 * 60_000)
     })
 
     const activePeriod = document.querySelector('[data-period="2"][data-period-state="active"]')
     const completedPeriod = document.querySelector('[data-period="1"][data-period-state="completed"]')
-    const activeChunk = activePeriod?.querySelector('[data-chunk-index="0"][data-chunk-state="active"]')
+    const activeChunk = activePeriod?.querySelector('[data-chunk-index="1"][data-chunk-state="active"]')
 
-    expect(completedPeriod).not.toBeNull()
+    expect(completedPeriod).toBeNull()
     expect(activePeriod).not.toBeNull()
     expect(activeChunk).not.toBeNull()
+    expect(getStoredMatchTimer()?.period).toBe(2)
   })
 
   it('stops the clock, keeps the elapsed time frozen, and resumes from the same point', async () => {
@@ -417,7 +423,7 @@ describe('App', () => {
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     act(() => {
       vi.advanceTimersByTime(7 * 60_000)
@@ -425,7 +431,7 @@ describe('App', () => {
 
     const pauseButton = screen
       .getAllByRole('button')
-      .find((button) => /pause klockan/i.test(button.textContent ?? ''))
+      .find((button) => /pausa klockan/i.test(button.textContent ?? ''))
 
     if (!pauseButton) {
       throw new Error('Pause-knappen saknas i testet.')
@@ -434,12 +440,13 @@ describe('App', () => {
     fireEvent.click(pauseButton)
 
     expect(getStoredMatchTimer()).toEqual({
-      version: 1,
+      version: 2,
       lineupSnapshot: expect.any(String),
       status: 'paused',
       startedAt: null,
       elapsedMs: 7 * 60_000,
-      matchDurationMs: 60 * 60_000,
+      period: 1,
+      periodDurationMs: 20 * 60_000,
     })
     expect(screen.getAllByText('7:00').length).toBeGreaterThan(1)
     expect(screen.getAllByText(/pausad i period 1 · byteblock 1/i).length).toBeGreaterThan(1)
@@ -450,7 +457,7 @@ describe('App', () => {
 
     expect(screen.getAllByText('7:00').length).toBeGreaterThan(1)
 
-    fireEvent.click(screen.getByRole('button', { name: /fortsätt match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fortsätt period 1/i }))
 
     act(() => {
       vi.advanceTimersByTime(2 * 60_000)
@@ -466,7 +473,7 @@ describe('App', () => {
 
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
     expect(getStoredMatchTimer()).not.toBeNull()
 
     const textarea = screen.getByLabelText(/spelare/i) as HTMLTextAreaElement
@@ -478,7 +485,7 @@ describe('App', () => {
 
     expect(getStoredMatchTimer()).toBeNull()
     expect(screen.getByText('0:00')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /starta match/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /starta period 1/i })).toBeEnabled()
   })
 
   it('prefers an explicit lineup in the url over a persisted timer state', () => {
@@ -499,12 +506,13 @@ describe('App', () => {
     window.localStorage.setItem(
       ACTIVE_MATCH_TIMER_STORAGE_KEY,
       serializeStoredActiveMatchTimer({
-        version: 1,
+        version: 2,
         lineupSnapshot: otherShareToken,
         status: 'running',
         startedAt: 12345,
         elapsedMs: 0,
-        matchDurationMs: 45 * 60_000,
+        period: 2,
+        periodDurationMs: 15 * 60_000,
       }),
     )
     setUrl(`/?lineup=${shareToken}`)
@@ -512,24 +520,29 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getByText('0:00')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /starta match/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /starta period 1/i })).toBeEnabled()
   })
 
-  it('shows match end state and completed periods when full time has passed', async () => {
+  it('stops at the end of the selected period and allows the next period to be started', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     act(() => {
-      vi.advanceTimersByTime(61 * 60_000)
+      vi.advanceTimersByTime(21 * 60_000)
     })
 
-    expect(screen.getAllByText(/match slut/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('60:00').length).toBeGreaterThan(1)
-    expect(document.querySelectorAll('[data-period-state="completed"]')).toHaveLength(3)
+    expect(screen.getAllByText(/period 1 klar/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('20:00').length).toBeGreaterThan(1)
+    expect(document.querySelectorAll('[data-period-state="completed"]')).toHaveLength(1)
+
+    const periodTwoButton = screen.getAllByRole('button', { name: /period 2/i })[0]
+    fireEvent.click(periodTwoButton)
+
+    expect(screen.getByRole('button', { name: /starta period 2/i })).toBeEnabled()
   })
 
   it('persists manual board overrides together with the running timer', async () => {
@@ -537,7 +550,7 @@ describe('App', () => {
     vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
 
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     const periodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
 
@@ -586,14 +599,14 @@ describe('App', () => {
 
     expect(screen.queryByText(/^live$/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     expect(screen.getByText(/^live$/i)).toBeInTheDocument()
     expect(screen.getAllByText('0:00').length).toBeGreaterThan(1)
 
     const pauseButton = screen
       .getAllByRole('button')
-      .find((button) => /pause klockan/i.test(button.textContent ?? ''))
+      .find((button) => /pausa klockan/i.test(button.textContent ?? ''))
 
     if (!pauseButton) {
       throw new Error('Pause-knappen saknas i testet.')
@@ -615,7 +628,7 @@ describe('App', () => {
 
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
     fireEvent.click(screen.getByRole('button', { name: /pågår i period 1 · byteblock 1/i }))
 
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)

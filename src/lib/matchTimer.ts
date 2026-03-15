@@ -1,7 +1,7 @@
 import type { MatchPlan } from './types'
 
 export const ACTIVE_MATCH_TIMER_STORAGE_KEY = 'eik.active-match-timer.v1'
-const STORED_ACTIVE_MATCH_TIMER_VERSION = 1
+const STORED_ACTIVE_MATCH_TIMER_VERSION = 2
 type StoredActiveMatchTimerStatus = 'running' | 'paused' | 'finished'
 
 export interface StoredActiveMatchTimer {
@@ -10,7 +10,8 @@ export interface StoredActiveMatchTimer {
   status: StoredActiveMatchTimerStatus
   startedAt: number | null
   elapsedMs: number
-  matchDurationMs: number
+  period: number
+  periodDurationMs: number
 }
 
 export interface MatchTimelineChunk {
@@ -24,7 +25,8 @@ export interface MatchTimelineChunk {
 
 export interface MatchTimeline {
   chunks: MatchTimelineChunk[]
-  totalDurationMs: number
+  periodCount: number
+  periodDurationMs: number
 }
 
 export interface MatchProgress {
@@ -39,9 +41,8 @@ export interface MatchProgress {
 export function buildMatchTimeline(plan: MatchPlan): MatchTimeline {
   const chunks = plan.periods.flatMap((period) =>
     period.chunks.map((chunk) => {
-      const periodOffsetMs = (period.period - 1) * plan.periodMinutes * 60_000
-      const startMs = periodOffsetMs + Math.round(chunk.startMinute * 60_000)
-      const endMs = periodOffsetMs + Math.round(chunk.endMinute * 60_000)
+      const startMs = Math.round(chunk.startMinute * 60_000)
+      const endMs = Math.round(chunk.endMinute * 60_000)
 
       return {
         period: period.period,
@@ -56,16 +57,17 @@ export function buildMatchTimeline(plan: MatchPlan): MatchTimeline {
 
   return {
     chunks,
-    totalDurationMs: plan.periodMinutes * plan.periods.length * 60_000,
+    periodCount: plan.periods.length,
+    periodDurationMs: plan.periodMinutes * 60_000,
   }
 }
 
-export function getIdleMatchProgress(totalDurationMs: number): MatchProgress {
+export function getIdleMatchProgress(periodDurationMs: number): MatchProgress {
   return {
     status: 'idle',
     elapsedMs: 0,
-    remainingMs: totalDurationMs,
-    progress: totalDurationMs > 0 ? 0 : 1,
+    remainingMs: periodDurationMs,
+    progress: periodDurationMs > 0 ? 0 : 1,
     activePeriod: null,
     activeChunkIndex: null,
   }
@@ -81,12 +83,12 @@ export function getMatchProgress({
   now: number
 }): MatchProgress {
   if (!timer) {
-    return getIdleMatchProgress(timeline.totalDurationMs)
+    return getIdleMatchProgress(timeline.periodDurationMs)
   }
 
-  const elapsedMs = resolveElapsedMs(timer, now, timeline.totalDurationMs)
-  const remainingMs = Math.max(0, timeline.totalDurationMs - elapsedMs)
-  const isFinished = elapsedMs >= timeline.totalDurationMs
+  const elapsedMs = resolveElapsedMs(timer, now, timer.periodDurationMs)
+  const remainingMs = Math.max(0, timer.periodDurationMs - elapsedMs)
+  const isFinished = elapsedMs >= timer.periodDurationMs
 
   if (isFinished) {
     return {
@@ -94,19 +96,19 @@ export function getMatchProgress({
       elapsedMs,
       remainingMs,
       progress: 1,
-      activePeriod: null,
+      activePeriod: timer.period,
       activeChunkIndex: null,
     }
   }
 
-  const activeChunk = getActiveTimelineChunk(timeline, elapsedMs)
+  const activeChunk = getActiveTimelineChunk(timeline, timer.period, elapsedMs)
 
   return {
     status: timer.status === 'paused' ? 'paused' : 'running',
     elapsedMs,
     remainingMs,
-    progress: timeline.totalDurationMs > 0 ? elapsedMs / timeline.totalDurationMs : 1,
-    activePeriod: activeChunk?.period ?? null,
+    progress: timer.periodDurationMs > 0 ? elapsedMs / timer.periodDurationMs : 1,
+    activePeriod: timer.period,
     activeChunkIndex: activeChunk?.windowIndex ?? null,
   }
 }
@@ -114,12 +116,14 @@ export function getMatchProgress({
 export function createRunningMatchTimer({
   lineupSnapshot,
   startedAt,
-  matchDurationMs,
+  period,
+  periodDurationMs,
   elapsedMs = 0,
 }: {
   lineupSnapshot: string
   startedAt: number
-  matchDurationMs: number
+  period: number
+  periodDurationMs: number
   elapsedMs?: number
 }): StoredActiveMatchTimer {
   return {
@@ -128,7 +132,8 @@ export function createRunningMatchTimer({
     status: 'running',
     startedAt,
     elapsedMs,
-    matchDurationMs,
+    period,
+    periodDurationMs,
   }
 }
 
@@ -136,11 +141,11 @@ export function pauseMatchTimer(
   timer: StoredActiveMatchTimer,
   now: number,
 ): StoredActiveMatchTimer {
-  const elapsedMs = resolveElapsedMs(timer, now, timer.matchDurationMs)
+  const elapsedMs = resolveElapsedMs(timer, now, timer.periodDurationMs)
 
   return {
     ...timer,
-    status: elapsedMs >= timer.matchDurationMs ? 'finished' : 'paused',
+    status: elapsedMs >= timer.periodDurationMs ? 'finished' : 'paused',
     startedAt: null,
     elapsedMs,
   }
@@ -174,29 +179,20 @@ export function parseStoredActiveMatchTimer(
 
   try {
     const parsed = JSON.parse(value) as Partial<StoredActiveMatchTimer>
-    const { matchDurationMs } = parsed
+    const { periodDurationMs, period } = parsed
 
     if (
       parsed.version !== STORED_ACTIVE_MATCH_TIMER_VERSION ||
       typeof parsed.lineupSnapshot !== 'string' ||
       parsed.lineupSnapshot.length === 0 ||
-      typeof matchDurationMs !== 'number' ||
-      !Number.isFinite(matchDurationMs) ||
-      matchDurationMs <= 0
+      typeof period !== 'number' ||
+      !Number.isInteger(period) ||
+      period < 1 ||
+      typeof periodDurationMs !== 'number' ||
+      !Number.isFinite(periodDurationMs) ||
+      periodDurationMs <= 0
     ) {
       return null
-    }
-
-    // Backward compatibility with the initial running-only timer schema.
-    if (!parsed.status && typeof parsed.startedAt === 'number' && Number.isFinite(parsed.startedAt)) {
-      return {
-        version: STORED_ACTIVE_MATCH_TIMER_VERSION,
-        lineupSnapshot: parsed.lineupSnapshot,
-        status: 'running',
-        startedAt: parsed.startedAt,
-        elapsedMs: 0,
-        matchDurationMs,
-      }
     }
 
     if (
@@ -228,8 +224,9 @@ export function parseStoredActiveMatchTimer(
       lineupSnapshot: parsed.lineupSnapshot,
       status: parsed.status,
       startedAt: parsed.status === 'running' ? parsed.startedAt ?? null : null,
-      elapsedMs: Math.min(parsed.elapsedMs, matchDurationMs),
-      matchDurationMs,
+      elapsedMs: Math.min(parsed.elapsedMs, periodDurationMs),
+      period,
+      periodDurationMs,
     }
   } catch {
     return null
@@ -240,12 +237,18 @@ export function isStoredActiveMatchTimerCompatible(
   timer: StoredActiveMatchTimer,
   timeline: MatchTimeline,
 ) {
-  return timer.matchDurationMs === timeline.totalDurationMs
+  return timer.periodDurationMs === timeline.periodDurationMs && timer.period <= timeline.periodCount
 }
 
-function getActiveTimelineChunk(timeline: MatchTimeline, elapsedMs: number) {
-  return timeline.chunks.find((chunk, index) => {
-    const isLastChunk = index === timeline.chunks.length - 1
+export function getTimelineChunksForPeriod(timeline: MatchTimeline, period: number) {
+  return timeline.chunks.filter((chunk) => chunk.period === period)
+}
+
+function getActiveTimelineChunk(timeline: MatchTimeline, period: number, elapsedMs: number) {
+  const periodChunks = getTimelineChunksForPeriod(timeline, period)
+
+  return periodChunks.find((chunk, index) => {
+    const isLastChunk = index === periodChunks.length - 1
     return elapsedMs >= chunk.startMs && (elapsedMs < chunk.endMs || (isLastChunk && elapsedMs === chunk.endMs))
   })
 }
@@ -253,12 +256,12 @@ function getActiveTimelineChunk(timeline: MatchTimeline, elapsedMs: number) {
 function resolveElapsedMs(
   timer: StoredActiveMatchTimer,
   now: number,
-  totalDurationMs: number,
+  periodDurationMs: number,
 ) {
   const liveElapsedMs =
     timer.status === 'running' && typeof timer.startedAt === 'number'
       ? timer.elapsedMs + Math.max(0, now - timer.startedAt)
       : timer.elapsedMs
 
-  return Math.min(liveElapsedMs, totalDurationMs)
+  return Math.min(liveElapsedMs, periodDurationMs)
 }
