@@ -1,7 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import {
+  ACTIVE_MATCH_TIMER_STORAGE_KEY,
+  parseStoredActiveMatchTimer,
+  serializeStoredActiveMatchTimer,
+} from './lib/matchTimer'
 import { createBoardAssignments, swapBoardAssignments } from './lib/planOverrides'
 import { encodeLineupSnapshot } from './lib/share'
 import { generateMatchPlan } from './lib/scheduler'
@@ -53,8 +58,7 @@ function buildSharedLineupFixture() {
   }
 }
 
-async function generateCustomPlan() {
-  const user = userEvent.setup()
+async function generateCustomPlan(user = userEvent.setup()) {
   render(<App />)
 
   const textarea = screen.getByLabelText(/spelare/i)
@@ -95,8 +99,10 @@ async function dragBadge(sourceLock: HTMLElement, targetLock: HTMLElement) {
 describe('App', () => {
   afterEach(() => {
     cleanup()
+    window.localStorage.clear()
     setUrl('/')
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('renders a generated match plan from user input', async () => {
@@ -325,7 +331,305 @@ describe('App', () => {
     expect(screen.getByDisplayValue('2-3-1')).toBeInTheDocument()
   })
 
+  it('stores an active timer from the current match snapshot', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    expect(getStoredMatchTimer()).toEqual({
+      version: 1,
+      lineupSnapshot: expect.any(String),
+      status: 'running',
+      startedAt: Date.now(),
+      elapsedMs: 0,
+      matchDurationMs: 60 * 60_000,
+    })
+  })
+
+  it('restores the persisted timer and lineup after reload without a share url', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(3 * 60_000)
+    })
+
+    cleanup()
+    setUrl('/')
+    render(<App />)
+
+    expect(screen.getAllByText('3:00').length).toBeGreaterThan(1)
+    expect(screen.getByText(/57:00 kvar av 60:00/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /starta match/i })).not.toBeInTheDocument()
+  })
+
+  it('restores the persisted timer when the same lineup is present in the url on reload', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(4 * 60_000)
+    })
+
+    const currentUrl = window.location.href
+
+    cleanup()
+    setUrl(currentUrl)
+    render(<App />)
+
+    expect(screen.getAllByText('4:00').length).toBeGreaterThan(1)
+    expect(screen.getByText(/56:00 kvar av 60:00/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /starta match/i })).not.toBeInTheDocument()
+  })
+
+  it('marks the active period and byteblock from the elapsed match time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(25 * 60_000)
+    })
+
+    const activePeriod = document.querySelector('[data-period="2"][data-period-state="active"]')
+    const completedPeriod = document.querySelector('[data-period="1"][data-period-state="completed"]')
+    const activeChunk = activePeriod?.querySelector('[data-chunk-index="0"][data-chunk-state="active"]')
+
+    expect(completedPeriod).not.toBeNull()
+    expect(activePeriod).not.toBeNull()
+    expect(activeChunk).not.toBeNull()
+  })
+
+  it('stops the clock, keeps the elapsed time frozen, and resumes from the same point', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(7 * 60_000)
+    })
+
+    const pauseButton = screen
+      .getAllByRole('button')
+      .find((button) => /pause klockan/i.test(button.textContent ?? ''))
+
+    if (!pauseButton) {
+      throw new Error('Pause-knappen saknas i testet.')
+    }
+
+    fireEvent.click(pauseButton)
+
+    expect(getStoredMatchTimer()).toEqual({
+      version: 1,
+      lineupSnapshot: expect.any(String),
+      status: 'paused',
+      startedAt: null,
+      elapsedMs: 7 * 60_000,
+      matchDurationMs: 60 * 60_000,
+    })
+    expect(screen.getAllByText('7:00').length).toBeGreaterThan(1)
+    expect(screen.getAllByText(/pausad i period 1 · byteblock 1/i).length).toBeGreaterThan(1)
+
+    act(() => {
+      vi.advanceTimersByTime(3 * 60_000)
+    })
+
+    expect(screen.getAllByText('7:00').length).toBeGreaterThan(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /fortsätt match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000)
+    })
+
+    expect(screen.getAllByText('9:00').length).toBeGreaterThan(1)
+    expect(screen.getAllByText(/pågår i period 1 · byteblock 1/i).length).toBeGreaterThan(1)
+  })
+
+  it('resets the timer when a new lineup is generated', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    expect(getStoredMatchTimer()).not.toBeNull()
+
+    const textarea = screen.getByLabelText(/spelare/i) as HTMLTextAreaElement
+
+    fireEvent.change(screen.getByLabelText(/spelare/i), {
+      target: { value: `${textarea.value}\nNova` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /generera uppställning/i }))
+
+    expect(getStoredMatchTimer()).toBeNull()
+    expect(screen.getByText('0:00')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /starta match/i })).toBeEnabled()
+  })
+
+  it('prefers an explicit lineup in the url over a persisted timer state', () => {
+    const { shareToken } = buildSharedLineupFixture()
+    const otherShareToken = encodeLineupSnapshot({
+      config: {
+        playerInput: 'Adam\nAnton\nBill\nDante\nDavid\nElias\nEmil\nGunnar',
+        playerNames: ['Adam', 'Anton', 'Bill', 'Dante', 'David', 'Elias', 'Emil', 'Gunnar'],
+        periodMinutes: 15,
+        formation: '2-3-1',
+        chunkMinutes: 7.5,
+        goalkeeperSelections: ['Adam', '', 'Anton'],
+        seed: 31337,
+      },
+      overrides: {},
+    })
+
+    window.localStorage.setItem(
+      ACTIVE_MATCH_TIMER_STORAGE_KEY,
+      serializeStoredActiveMatchTimer({
+        version: 1,
+        lineupSnapshot: otherShareToken,
+        status: 'running',
+        startedAt: 12345,
+        elapsedMs: 0,
+        matchDurationMs: 45 * 60_000,
+      }),
+    )
+    setUrl(`/?lineup=${shareToken}`)
+
+    render(<App />)
+
+    expect(screen.getByText('0:00')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /starta match/i })).toBeEnabled()
+  })
+
+  it('shows match end state and completed periods when full time has passed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    act(() => {
+      vi.advanceTimersByTime(61 * 60_000)
+    })
+
+    expect(screen.getAllByText(/match slut/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('60:00').length).toBeGreaterThan(1)
+    expect(document.querySelectorAll('[data-period-state="completed"]')).toHaveLength(3)
+  })
+
+  it('persists manual board overrides together with the running timer', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    const periodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!periodCard) {
+      throw new Error('Periodkort saknas i testet.')
+    }
+
+    const lockButtons = within(periodCard)
+      .getAllByRole('button', { name: /^lås /i })
+      .filter((button) => !/ på mv$/i.test(button.getAttribute('aria-label') ?? ''))
+
+    await dragBadge(lockButtons[0], lockButtons[1])
+
+    const swappedLabels = within(periodCard)
+      .getAllByRole('button', { name: /^lås /i })
+      .map((button) => button.getAttribute('aria-label'))
+
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000)
+    })
+
+    cleanup()
+    setUrl('/')
+    render(<App />)
+
+    expect(screen.getAllByText('2:00').length).toBeGreaterThan(1)
+
+    const restoredPeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!restoredPeriodCard) {
+      throw new Error('Återställt periodkort saknas i testet.')
+    }
+
+    const restoredLabels = within(restoredPeriodCard)
+      .getAllByRole('button', { name: /^lås /i })
+      .map((button) => button.getAttribute('aria-label'))
+
+    expect(restoredLabels).toEqual(swappedLabels)
+  })
+
+  it('shows a floating live timer while the match is active or paused', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-15T09:00:00Z'))
+
+    render(<App />)
+
+    expect(screen.queryByText(/^live$/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+
+    expect(screen.getByText(/^live$/i)).toBeInTheDocument()
+    expect(screen.getAllByText('0:00').length).toBeGreaterThan(1)
+
+    const pauseButton = screen
+      .getAllByRole('button')
+      .find((button) => /pause klockan/i.test(button.textContent ?? ''))
+
+    if (!pauseButton) {
+      throw new Error('Pause-knappen saknas i testet.')
+    }
+
+    fireEvent.click(pauseButton)
+
+    expect(screen.getByText(/^live$/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/pausad/i).length).toBeGreaterThan(1)
+  })
+
+  it('scrolls to the active byteblock when the floating status row is tapped', () => {
+    const scrollIntoViewMock = vi.fn()
+
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoViewMock,
+    })
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta match/i }))
+    fireEvent.click(screen.getByRole('button', { name: /pågår i period 1 · byteblock 1/i }))
+
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  })
+
 })
+
+function getStoredMatchTimer() {
+  return parseStoredActiveMatchTimer(window.localStorage.getItem(ACTIVE_MATCH_TIMER_STORAGE_KEY))
+}
 
 function getPlayerName(playerId: string) {
   return {

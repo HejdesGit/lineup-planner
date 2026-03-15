@@ -54,6 +54,20 @@ import {
   LINEUP_SHARE_QUERY_PARAM,
 } from './lib/share'
 import {
+  ACTIVE_MATCH_TIMER_STORAGE_KEY,
+  buildMatchTimeline,
+  createRunningMatchTimer,
+  getMatchProgress,
+  isStoredActiveMatchTimerCompatible,
+  parseStoredActiveMatchTimer,
+  pauseMatchTimer,
+  resumeMatchTimer,
+  serializeStoredActiveMatchTimer,
+  type MatchProgress,
+  type MatchTimeline,
+  type StoredActiveMatchTimer,
+} from './lib/matchTimer'
+import {
   FORMATION_PRESETS,
   type FormationKey,
   type GeneratedConfig,
@@ -152,6 +166,7 @@ interface InitialAppState {
   plan: MatchPlan | null
   periodOverrides: PeriodBoardOverrides
   shouldSyncShareUrl: boolean
+  activeMatchTimer: StoredActiveMatchTimer | null
 }
 
 function formReducer(state: FormState, action: FormAction): FormState {
@@ -192,6 +207,10 @@ function App() {
   const [plan, setPlan] = useState<MatchPlan | null>(initialState.plan)
   const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
   const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
+  const [activeMatchTimer, setActiveMatchTimer] = useState<StoredActiveMatchTimer | null>(
+    initialState.activeMatchTimer,
+  )
+  const [timerNow, setTimerNow] = useState(() => Date.now())
 
   const rosterNames = useMemo(() => getRosterNames(formState.playerInput), [formState.playerInput])
   const playerOptions = rosterNames
@@ -207,6 +226,28 @@ function App() {
   const playerNameById = displayPlan
     ? Object.fromEntries(displayPlan.summaries.map((summary) => [summary.playerId, summary.name]))
     : {}
+  const lineupSnapshot = useMemo(
+    () =>
+      plan
+        ? encodeLineupSnapshot({
+          config: generatedConfig,
+          overrides: serializePeriodOverrides(normalizedOverrides),
+        })
+        : null,
+    [generatedConfig, normalizedOverrides, plan],
+  )
+  const matchTimeline = useMemo(() => (plan ? buildMatchTimeline(plan) : null), [plan])
+  const matchProgress = useMemo(
+    () =>
+      matchTimeline
+        ? getMatchProgress({
+          timeline: matchTimeline,
+          timer: activeMatchTimer,
+          now: timerNow,
+        })
+        : null,
+    [activeMatchTimer, matchTimeline, timerNow],
+  )
 
   useEffect(() => {
     if (!plan || !shouldSyncShareUrl) {
@@ -219,6 +260,48 @@ function App() {
       window.history.replaceState(null, '', nextUrl)
     }
   }, [generatedConfig, normalizedOverrides, plan, shouldSyncShareUrl])
+
+  useEffect(() => {
+    if (!matchTimeline || !activeMatchTimer || activeMatchTimer.status !== 'running') {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setTimerNow(Date.now())
+    }, 1_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [activeMatchTimer, matchTimeline])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (!activeMatchTimer || !lineupSnapshot || !matchTimeline) {
+      try {
+        window.localStorage.removeItem(ACTIVE_MATCH_TIMER_STORAGE_KEY)
+      } catch {
+        // Ignore local persistence failures in v1.
+      }
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        ACTIVE_MATCH_TIMER_STORAGE_KEY,
+        serializeStoredActiveMatchTimer({
+          ...activeMatchTimer,
+          lineupSnapshot,
+          matchDurationMs: matchTimeline.totalDurationMs,
+        }),
+      )
+    } catch {
+      // Ignore local persistence failures in v1.
+    }
+  }, [activeMatchTimer, lineupSnapshot, matchTimeline])
 
   const handleGenerate = () => {
     try {
@@ -246,6 +329,8 @@ function App() {
         setPlan(nextPlan)
         setPeriodOverrides({})
         setShouldSyncShareUrl(true)
+        setActiveMatchTimer(null)
+        setTimerNow(Date.now())
       })
     } catch (error) {
       dispatch({
@@ -256,7 +341,51 @@ function App() {
       setPlan(null)
       setPeriodOverrides({})
       setShouldSyncShareUrl(false)
+      setActiveMatchTimer(null)
+      setTimerNow(Date.now())
     }
+  }
+
+  const handleStartMatch = () => {
+    if (!lineupSnapshot || !matchTimeline) {
+      return
+    }
+
+    const startedAt = Date.now()
+
+    setTimerNow(startedAt)
+    setActiveMatchTimer(
+      createRunningMatchTimer({
+        lineupSnapshot,
+        startedAt,
+        matchDurationMs: matchTimeline.totalDurationMs,
+      }),
+    )
+  }
+
+  const handlePauseMatch = () => {
+    if (!activeMatchTimer) {
+      return
+    }
+
+    const now = Date.now()
+    setTimerNow(now)
+    setActiveMatchTimer(pauseMatchTimer(activeMatchTimer, now))
+  }
+
+  const handleResumeMatch = () => {
+    if (!activeMatchTimer) {
+      return
+    }
+
+    const now = Date.now()
+    setTimerNow(now)
+    setActiveMatchTimer(resumeMatchTimer(activeMatchTimer, now))
+  }
+
+  const handleResetMatchTimer = () => {
+    setActiveMatchTimer(null)
+    setTimerNow(Date.now())
   }
 
   const handleShareViaWhatsApp = () => {
@@ -293,7 +422,16 @@ function App() {
 
         {displayPlan && plan ? (
           <>
-            <MatchOverview plan={displayPlan} playerNameById={playerNameById} />
+            <MatchOverview
+              plan={displayPlan}
+              playerNameById={playerNameById}
+              matchProgress={matchProgress}
+              matchTimeline={matchTimeline}
+              onStartMatch={handleStartMatch}
+              onPauseMatch={handlePauseMatch}
+              onResumeMatch={handleResumeMatch}
+              onResetMatch={handleResetMatchTimer}
+            />
 
             <section className="grid gap-5 xl:grid-cols-3">
               {displayPlan.periods.map((period, index) => (
@@ -307,6 +445,11 @@ function App() {
                   defaultLockedSlots={
                     displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
                   }
+                  isActivePeriod={matchProgress?.activePeriod === period.period}
+                  activeChunkIndex={
+                    matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
+                  }
+                  periodState={getPeriodState(period.period, matchProgress)}
                   onSwapSlots={(sourceSlot, targetSlot) => {
                     setShouldSyncShareUrl(true)
                     setPeriodOverrides((current) => {
@@ -328,6 +471,14 @@ function App() {
             </section>
 
             <PlayerMinutesSection plan={displayPlan} />
+
+            {matchProgress && matchTimeline && matchProgress.status !== 'idle' ? (
+              <FloatingMatchTimer
+                matchProgress={matchProgress}
+                matchTimeline={matchTimeline}
+                onScrollToActiveSection={scrollToActiveMatchSection}
+              />
+            ) : null}
           </>
         ) : (
           <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-8 text-center text-stone-300">
@@ -337,6 +488,23 @@ function App() {
       </div>
     </main>
   )
+
+  function scrollToActiveMatchSection() {
+    if (!matchProgress) {
+      return
+    }
+
+    const activeChunkId = getActiveChunkAnchorId(matchProgress)
+
+    if (!activeChunkId) {
+      return
+    }
+
+    document.getElementById(activeChunkId)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  }
 }
 
 function HeroPanel() {
@@ -566,37 +734,259 @@ function SettingsPanel({
 function MatchOverview({
   plan,
   playerNameById,
+  matchProgress,
+  matchTimeline,
+  onStartMatch,
+  onPauseMatch,
+  onResumeMatch,
+  onResetMatch,
 }: {
   plan: MatchPlan
   playerNameById: Record<string, string>
+  matchProgress: MatchProgress | null
+  matchTimeline: MatchTimeline | null
+  onStartMatch: () => void
+  onPauseMatch: () => void
+  onResumeMatch: () => void
+  onResetMatch: () => void
 }) {
   return (
     <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5 backdrop-blur">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <div>
-          <h2 className="font-display text-2xl font-bold text-white">Matchöversikt</h2>
-          <p className="text-sm text-stone-300">
-            Seed {plan.seed} · Score {plan.score.toFixed(1)}
-          </p>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="font-display text-2xl font-bold text-white">Matchöversikt</h2>
+              <p className="text-sm text-stone-300">
+                Seed {plan.seed} · Score {plan.score.toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-xs text-stone-300">
+              {plan.periodMinutes} min/period
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <SummaryChip
+              label="Målvakter"
+              value={plan.goalkeepers.map((goalkeeperId) => playerNameById[goalkeeperId]).join(', ')}
+            />
+            <SummaryChip label="Formation" value={plan.formation} />
+            <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
+            <SummaryChip
+              label="Byten"
+              value={`${getSubstitutionsPerPeriod(plan.periodMinutes, plan.chunkMinutes)} per period`}
+            />
+            <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
+          </div>
         </div>
-        <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-xs text-stone-300">
-          {plan.periodMinutes} min/period
-        </div>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <SummaryChip
-          label="Målvakter"
-          value={plan.goalkeepers.map((goalkeeperId) => playerNameById[goalkeeperId]).join(', ')}
-        />
-        <SummaryChip label="Formation" value={plan.formation} />
-        <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
-        <SummaryChip
-          label="Byten"
-          value={`${getSubstitutionsPerPeriod(plan.periodMinutes, plan.chunkMinutes)} per period`}
-        />
-        <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
+
+        {matchProgress && matchTimeline ? (
+          <MatchTimerPanel
+            plan={plan}
+            matchProgress={matchProgress}
+            matchTimeline={matchTimeline}
+            onStartMatch={onStartMatch}
+            onPauseMatch={onPauseMatch}
+            onResumeMatch={onResumeMatch}
+            onResetMatch={onResetMatch}
+          />
+        ) : null}
       </div>
     </section>
+  )
+}
+
+function MatchTimerPanel({
+  plan,
+  matchProgress,
+  matchTimeline,
+  onStartMatch,
+  onPauseMatch,
+  onResumeMatch,
+  onResetMatch,
+}: {
+  plan: MatchPlan
+  matchProgress: MatchProgress
+  matchTimeline: MatchTimeline
+  onStartMatch: () => void
+  onPauseMatch: () => void
+  onResumeMatch: () => void
+  onResetMatch: () => void
+}) {
+  const statusLabel = getMatchStatusLabel(matchProgress)
+  const statusSummary = getMatchProgressSummary(matchProgress)
+
+  return (
+    <section className="overflow-hidden rounded-[1.5rem] border border-clay-300/20 bg-[radial-gradient(circle_at_top,_rgba(212,125,51,0.18),_transparent_42%),linear-gradient(180deg,rgba(36,20,13,0.92),rgba(16,10,7,0.96))] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.25)] sm:p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-clay-100/70">
+            Matchtimer
+          </p>
+          <h3 className="mt-2 font-display text-4xl font-black text-white">
+            {formatMatchClock(matchProgress.elapsedMs)}
+          </h3>
+          <p className="mt-2 text-sm text-stone-300">
+            {matchProgress.status === 'finished'
+              ? 'Match slut'
+              : `${formatMatchClock(matchProgress.remainingMs)} kvar av ${formatMatchClock(matchTimeline.totalDurationMs)}`}
+          </p>
+          <p className="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-clay-100/70">
+            {statusSummary}
+          </p>
+        </div>
+
+        <div
+          className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-[0.24em] ${matchProgress.status === 'finished'
+              ? 'border-emerald-300/30 bg-emerald-400/10 text-emerald-100'
+              : matchProgress.status === 'running'
+                ? 'border-clay-300/30 bg-clay-400/10 text-clay-50'
+                : matchProgress.status === 'paused'
+                  ? 'border-sky-300/30 bg-sky-400/10 text-sky-100'
+                  : 'border-white/10 bg-black/20 text-stone-300'
+            }`}
+        >
+          {statusLabel}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <div className="relative overflow-hidden rounded-[1.1rem] border border-white/10 bg-black/30 px-2 py-2.5">
+          <div className="pointer-events-none absolute inset-y-0 left-0 rounded-[0.9rem] bg-[linear-gradient(90deg,rgba(212,125,51,0.72),rgba(251,191,36,0.55))] transition-[width] duration-700 ease-out" style={{ width: `${matchProgress.progress * 100}%` }} />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-full">
+            {matchTimeline.chunks.slice(0, -1).map((chunk) => (
+              <span
+                key={`chunk-marker-${chunk.chunkIndex}`}
+                className="absolute top-0 h-full w-px bg-white/12"
+                style={{ left: `${(chunk.endMs / matchTimeline.totalDurationMs) * 100}%` }}
+              />
+            ))}
+          </div>
+          <div className="relative grid grid-cols-3 gap-2">
+            {Array.from({ length: plan.periods.length }, (_, index) => {
+              const periodNumber = index + 1
+              const periodState = getPeriodState(periodNumber, matchProgress)
+
+              return (
+                <div
+                  key={`timeline-period-${periodNumber}`}
+                  className={`rounded-[0.9rem] border px-3 py-2 ${periodState === 'active'
+                      ? 'border-clay-200/40 bg-white/10'
+                      : periodState === 'completed'
+                        ? 'border-emerald-300/15 bg-emerald-400/5'
+                        : 'border-white/8 bg-black/10'
+                    }`}
+                >
+                  <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-stone-300/80">
+                    Period {periodNumber}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-white">{plan.periodMinutes} min</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        {matchProgress.status === 'idle' ? (
+          <button
+            type="button"
+            onClick={onStartMatch}
+            className="inline-flex h-11 items-center justify-center rounded-full bg-clay-400 px-5 font-display text-base font-bold text-clay-900 transition hover:bg-clay-300"
+          >
+            Starta match
+          </button>
+        ) : null}
+        {matchProgress.status === 'running' ? (
+          <button
+            type="button"
+            onClick={onPauseMatch}
+            className="inline-flex h-11 items-center justify-center rounded-full bg-sky-300 px-5 font-display text-base font-bold text-sky-950 transition hover:bg-sky-200"
+          >
+            Pause klockan
+          </button>
+        ) : null}
+        {matchProgress.status === 'paused' ? (
+          <button
+            type="button"
+            onClick={onResumeMatch}
+            className="inline-flex h-11 items-center justify-center rounded-full bg-clay-400 px-5 font-display text-base font-bold text-clay-900 transition hover:bg-clay-300"
+          >
+            Fortsätt match
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onResetMatch}
+          className="inline-flex h-11 items-center justify-center rounded-full border border-white/10 bg-white/5 px-5 font-display text-base font-bold text-white transition hover:border-clay-300/40 hover:bg-clay-500/10"
+        >
+          Nollställ
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function FloatingMatchTimer({
+  matchProgress,
+  matchTimeline,
+  onScrollToActiveSection,
+}: {
+  matchProgress: MatchProgress
+  matchTimeline: MatchTimeline
+  onScrollToActiveSection: () => void
+}) {
+  const statusLabel = getMatchStatusLabel(matchProgress)
+  const canScrollToActiveSection = Boolean(getActiveChunkAnchorId(matchProgress))
+
+  return (
+    <aside className="pointer-events-none fixed inset-x-3 bottom-3 z-40 sm:inset-x-auto sm:right-4 sm:top-4 sm:bottom-auto">
+      <div className="pointer-events-auto rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,24,13,0.94),rgba(12,18,10,0.96))] px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur xl:min-w-[18rem]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-clay-100/70">
+              Live
+            </p>
+            <p className="mt-1 font-display text-3xl font-black text-white">
+              {formatMatchClock(matchProgress.elapsedMs)}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-200">
+              {statusLabel}
+            </p>
+            <p className="mt-2 text-xs text-stone-300">
+              {matchProgress.status === 'finished'
+                ? 'Full tid'
+                : `${formatMatchClock(matchProgress.remainingMs)} kvar`}
+            </p>
+          </div>
+        </div>
+        {canScrollToActiveSection ? (
+          <button
+            type="button"
+            onClick={onScrollToActiveSection}
+            className="mt-3 text-left text-xs font-medium uppercase tracking-[0.18em] text-clay-100/75 transition hover:text-clay-50 focus:outline-none focus:ring-2 focus:ring-clay-300/30"
+          >
+            {getMatchProgressSummary(matchProgress)}
+          </button>
+        ) : (
+          <p className="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-clay-100/75">
+            {getMatchProgressSummary(matchProgress)}
+          </p>
+        )}
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-[linear-gradient(90deg,rgba(212,125,51,0.82),rgba(251,191,36,0.64))] transition-[width] duration-700 ease-out"
+            style={{ width: `${matchProgress.progress * 100}%` }}
+          />
+        </div>
+        <p className="mt-2 text-[11px] text-stone-400">
+          {formatMatchClock(matchTimeline.totalDurationMs)} total matchtid
+        </p>
+      </div>
+    </aside>
   )
 }
 
@@ -779,12 +1169,18 @@ function PeriodCard({
   nameById,
   onSwapSlots,
   defaultLockedSlots,
+  isActivePeriod,
+  activeChunkIndex,
+  periodState,
 }: {
   period: PeriodPlan
   boardAssignments: Record<BoardSlotId, string>
   nameById: Record<string, string>
   onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
   defaultLockedSlots: BoardSlotId[]
+  isActivePeriod: boolean
+  activeChunkIndex: number | null
+  periodState: 'upcoming' | 'active' | 'completed'
 }) {
   const [manualLockedSlots, setManualLockedSlots] = useState<BoardSlotId[]>([])
   const [dismissedDefaultLockedSlots, setDismissedDefaultLockedSlots] = useState<BoardSlotId[]>([])
@@ -814,9 +1210,9 @@ function PeriodCard({
   )
   const canPreviewSwap = Boolean(
     activeSlot &&
-      overSlot &&
-      activeSlot !== overSlot &&
-      !lockedSlots.includes(activeSlot) &&
+    overSlot &&
+    activeSlot !== overSlot &&
+    !lockedSlots.includes(activeSlot) &&
     !lockedSlots.includes(overSlot),
   )
   const previewAssignments = useMemo(
@@ -863,7 +1259,16 @@ function PeriodCard({
   }
 
   return (
-    <article className="rounded-[1.5rem] border border-white/10 bg-white/5 p-3.5 backdrop-blur sm:rounded-[1.75rem] sm:p-5">
+    <article
+      data-period={period.period}
+      data-period-state={periodState}
+      className={`rounded-[1.5rem] border p-3.5 backdrop-blur transition sm:rounded-[1.75rem] sm:p-5 ${periodState === 'active'
+          ? 'border-clay-300/35 bg-white/[0.08] shadow-[0_0_0_1px_rgba(251,191,36,0.08),0_18px_45px_rgba(0,0,0,0.18)]'
+          : periodState === 'completed'
+            ? 'border-emerald-300/10 bg-white/[0.06]'
+            : 'border-white/10 bg-white/5'
+        }`}
+    >
       <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.24em] text-clay-200">Period {period.period}</p>
@@ -872,7 +1277,12 @@ function PeriodCard({
           </h2>
           <p className="mt-1 text-sm text-stone-300">Formation: {period.formation}</p>
         </div>
-        <div className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-left sm:w-auto sm:max-w-[18rem] sm:text-right">
+        <div
+          className={`w-full rounded-2xl border px-3 py-2 text-left sm:w-auto sm:max-w-[18rem] sm:text-right ${isActivePeriod
+              ? 'border-clay-300/30 bg-clay-400/10'
+              : 'border-white/10 bg-black/20'
+            }`}
+        >
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-500">Startbänk</p>
           <p className="mt-1 text-sm text-white">
             {startBenchNames.length ? startBenchNames.join(', ') : 'Ingen'}
@@ -904,11 +1314,20 @@ function PeriodCard({
           const currentIncomingIds = new Set(chunk.substitutions.map((substitution) => substitution.playerInId))
           const nextOutgoingIds = new Set(nextChunk?.substitutions.map((substitution) => substitution.playerOutId) ?? [])
           const chunkLineup = chunkIndex === 0 ? displayLineup : chunk.lineup
+          const chunkState = getChunkState(periodState, activeChunkIndex, chunk.windowIndex)
 
           return (
             <div
               key={chunk.chunkIndex}
-              className="rounded-[1.1rem] border border-white/10 bg-black/20 px-3 py-3 sm:rounded-[1.25rem] sm:px-4"
+              id={getChunkAnchorId(period.period, chunk.windowIndex)}
+              data-chunk-index={chunk.windowIndex}
+              data-chunk-state={chunkState}
+              className={`rounded-[1.1rem] border px-3 py-3 transition sm:rounded-[1.25rem] sm:px-4 ${chunkState === 'active'
+                  ? 'border-clay-300/35 bg-clay-500/10 shadow-[0_0_0_1px_rgba(251,191,36,0.06)]'
+                  : chunkState === 'completed'
+                    ? 'border-emerald-300/12 bg-emerald-400/[0.05]'
+                    : 'border-white/10 bg-black/20'
+                }`}
             >
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div>
@@ -1381,11 +1800,10 @@ function PositionBadgeCard({
             event.stopPropagation()
             onToggleLock()
           }}
-          className={`absolute -right-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur sm:-right-2.5 sm:-top-2.5 sm:h-9 sm:w-9 ${
-            locked
+          className={`absolute -right-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur sm:-right-2.5 sm:-top-2.5 sm:h-9 sm:w-9 ${locked
               ? 'border-clay-200/50 bg-clay-400/25 text-clay-50 shadow-[0_0_0_1px_rgba(251,191,36,0.1)]'
               : 'border-white/10 bg-black/20 text-stone-300 hover:border-white/20 hover:text-white'
-          }`}
+            }`}
           aria-label={locked ? `Lås upp ${player} på ${label}` : `Lås ${player} på ${label}`}
         >
           {locked ? (
@@ -1493,9 +1911,8 @@ function ChunkPositionBadge({
 
   return (
     <div
-      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-2 text-center ${toneClasses[tone]} ${
-        isSingle ? 'max-w-[11rem]' : ''
-      }`}
+      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-2 text-center ${toneClasses[tone]} ${isSingle ? 'max-w-[11rem]' : ''
+        }`}
     >
       <div className="pointer-events-none">
         <p className="font-mono text-[9px] uppercase tracking-[0.26em] text-white/75">{label}</p>
@@ -1568,33 +1985,58 @@ function createInitialAppState(): InitialAppState {
   }
 
   const sharedValue = new URL(window.location.href).searchParams.get(LINEUP_SHARE_QUERY_PARAM)
+  const storedTimer = readStoredActiveMatchTimer()
 
-  if (!sharedValue) {
+  if (sharedValue) {
+    try {
+      const hydratedState = createHydratedStateFromSnapshot(sharedValue)
+      const matchTimeline = buildMatchTimeline(hydratedState.plan)
+      const activeMatchTimer =
+        storedTimer &&
+          storedTimer.lineupSnapshot === sharedValue &&
+          isStoredActiveMatchTimerCompatible(storedTimer, matchTimeline)
+          ? storedTimer
+          : null
+
+      return {
+        ...hydratedState,
+        shouldSyncShareUrl: true,
+        activeMatchTimer,
+      }
+    } catch {
+      window.history.replaceState(null, '', clearLineupShareUrl(window.location.href))
+
+      return {
+        ...defaultState,
+        formState: {
+          ...defaultState.formState,
+          errors: [SHARE_LINK_ERROR_MESSAGE],
+        },
+      }
+    }
+  }
+
+  if (!storedTimer) {
     return defaultState
   }
 
   try {
-    const { config, overrides } = decodeLineupSnapshot(sharedValue)
-    const hydratedPlan = buildPlanFromGeneratedConfig(config, true)
-    const hydratedOverrides = validateSharedOverrides(hydratedPlan, overrides)
+    const hydratedState = createHydratedStateFromSnapshot(storedTimer.lineupSnapshot)
+    const matchTimeline = buildMatchTimeline(hydratedState.plan)
+
+    if (!isStoredActiveMatchTimerCompatible(storedTimer, matchTimeline)) {
+      clearStoredActiveMatchTimer()
+      return defaultState
+    }
 
     return {
-      formState: createFormStateFromConfig(config),
-      generatedConfig: config,
-      plan: hydratedPlan,
-      periodOverrides: hydratedOverrides,
-      shouldSyncShareUrl: true,
+      ...hydratedState,
+      shouldSyncShareUrl: false,
+      activeMatchTimer: storedTimer,
     }
   } catch {
-    window.history.replaceState(null, '', clearLineupShareUrl(window.location.href))
-
-    return {
-      ...defaultState,
-      formState: {
-        ...defaultState.formState,
-        errors: [SHARE_LINK_ERROR_MESSAGE],
-      },
-    }
+    clearStoredActiveMatchTimer()
+    return defaultState
   }
 }
 
@@ -1626,6 +2068,20 @@ function createDefaultAppState(): InitialAppState {
     plan: initialPlan,
     periodOverrides: {},
     shouldSyncShareUrl: false,
+    activeMatchTimer: null,
+  }
+}
+
+function createHydratedStateFromSnapshot(encodedSnapshot: string) {
+  const { config, overrides } = decodeLineupSnapshot(encodedSnapshot)
+  const hydratedPlan = buildPlanFromGeneratedConfig(config, true)
+  const hydratedOverrides = validateSharedOverrides(hydratedPlan, overrides)
+
+  return {
+    formState: createFormStateFromConfig(config),
+    generatedConfig: config,
+    plan: hydratedPlan,
+    periodOverrides: hydratedOverrides,
   }
 }
 
@@ -1637,6 +2093,39 @@ function createFormStateFromConfig(config: GeneratedConfig): FormState {
     chunkMinutes: config.chunkMinutes,
     goalkeeperSelections: [...config.goalkeeperSelections] as GoalkeeperSelections,
     errors: [],
+  }
+}
+
+function readStoredActiveMatchTimer() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const parsedTimer = parseStoredActiveMatchTimer(
+      window.localStorage.getItem(ACTIVE_MATCH_TIMER_STORAGE_KEY),
+    )
+
+    if (!parsedTimer) {
+      window.localStorage.removeItem(ACTIVE_MATCH_TIMER_STORAGE_KEY)
+      return null
+    }
+
+    return parsedTimer
+  } catch {
+    return null
+  }
+}
+
+function clearStoredActiveMatchTimer() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(ACTIVE_MATCH_TIMER_STORAGE_KEY)
+  } catch {
+    // Ignore local persistence failures in v1.
   }
 }
 
@@ -1812,6 +2301,98 @@ function getSubstitutionOptions(periodMinutes: 15 | 20, currentChunkMinutes?: nu
   return options
 }
 
+function getPeriodState(
+  periodNumber: number,
+  matchProgress: MatchProgress | null,
+): 'upcoming' | 'active' | 'completed' {
+  if (!matchProgress || matchProgress.status === 'idle') {
+    return 'upcoming'
+  }
+
+  if (matchProgress.status === 'finished') {
+    return 'completed'
+  }
+
+  if (matchProgress.activePeriod === periodNumber) {
+    return 'active'
+  }
+
+  if (matchProgress.activePeriod && periodNumber < matchProgress.activePeriod) {
+    return 'completed'
+  }
+
+  return 'upcoming'
+}
+
+function getMatchStatusLabel(matchProgress: MatchProgress) {
+  if (matchProgress.status === 'finished') {
+    return 'Match slut'
+  }
+
+  if (matchProgress.status === 'paused') {
+    return 'Pausad'
+  }
+
+  if (matchProgress.status === 'running') {
+    return `Period ${matchProgress.activePeriod ?? 1}`
+  }
+
+  return 'Redo'
+}
+
+function getMatchProgressSummary(matchProgress: MatchProgress) {
+  if (matchProgress.status === 'finished') {
+    return 'Alla byteblock avslutade'
+  }
+
+  const byteblockLabel =
+    typeof matchProgress.activeChunkIndex === 'number'
+      ? `Byteblock ${matchProgress.activeChunkIndex + 1}`
+      : 'Byteblock väntar'
+
+  if (matchProgress.status === 'paused') {
+    return `Pausad i period ${matchProgress.activePeriod ?? 1} · ${byteblockLabel}`
+  }
+
+  if (matchProgress.status === 'running') {
+    return `Pågår i period ${matchProgress.activePeriod ?? 1} · ${byteblockLabel}`
+  }
+
+  return 'Redo att starta'
+}
+
+function getChunkState(
+  periodState: 'upcoming' | 'active' | 'completed',
+  activeChunkIndex: number | null,
+  chunkIndex: number,
+): 'upcoming' | 'active' | 'completed' {
+  if (periodState === 'completed') {
+    return 'completed'
+  }
+
+  if (periodState !== 'active' || activeChunkIndex === null) {
+    return 'upcoming'
+  }
+
+  if (chunkIndex === activeChunkIndex) {
+    return 'active'
+  }
+
+  return chunkIndex < activeChunkIndex ? 'completed' : 'upcoming'
+}
+
+function getChunkAnchorId(period: number, chunkIndex: number) {
+  return `active-period-${period}-chunk-${chunkIndex}`
+}
+
+function getActiveChunkAnchorId(matchProgress: MatchProgress) {
+  if (matchProgress.activePeriod === null || matchProgress.activeChunkIndex === null) {
+    return null
+  }
+
+  return getChunkAnchorId(matchProgress.activePeriod, matchProgress.activeChunkIndex)
+}
+
 function getNormalizedChunkMinutes(periodMinutes: 15 | 20, currentChunkMinutes: number) {
   const supportedChunkMinutes = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) =>
     getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
@@ -1841,6 +2422,14 @@ function formatMinuteValue(value: number) {
   }
 
   return formatMinuteClockValue(value)
+}
+
+function formatMatchClock(valueMs: number) {
+  const totalSeconds = Math.max(0, Math.round(valueMs / 1_000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
 function formatMinuteDuration(value: number) {
