@@ -10,7 +10,8 @@
     "scenarios:live": "tsx scripts/live-adjustment-scenarios.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:lineup-audit": "tsx scripts/generate-lineup-audit.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

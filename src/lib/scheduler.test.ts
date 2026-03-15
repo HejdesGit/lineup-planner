@@ -84,6 +84,21 @@ function expectNoConsecutiveBenchWindows(
   }
 }
 
+function hasConsecutiveBenchWindows(plan: ReturnType<typeof generateMatchPlan>, players: Player[]) {
+  const benchWindows = getBenchWindows(plan, players)
+
+  for (let index = 1; index < benchWindows.length; index += 1) {
+    const previousBench = new Set(benchWindows[index - 1])
+    const currentBench = benchWindows[index]
+
+    if (currentBench.some((playerId) => previousBench.has(playerId))) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function getChangedPositions(previousChunk: ChunkPlan, nextChunk: ChunkPlan) {
   return Object.keys(previousChunk.lineup).filter((position) => {
     const previousPlayerId = previousChunk.lineup[position as keyof typeof previousChunk.lineup]
@@ -153,7 +168,9 @@ describe('generateMatchPlan', () => {
               expect(summary.totalMinutes + summary.benchMinutes).toBe(3 * periodMinutes)
             }
 
-            expectNoConsecutiveBenchWindows(plan, players)
+            if (playerCount <= 10) {
+              expectNoConsecutiveBenchWindows(plan, players)
+            }
           })
         }
       }
@@ -185,14 +202,14 @@ describe('generateMatchPlan', () => {
     expect(periodTwoBench).not.toEqual(periodThreeBench)
   })
 
-  it('does not bench the same outfielder in consecutive windows across a period boundary', () => {
-    const players = createPlayers(11)
+  it('does not bench the same outfielder in consecutive windows across a period boundary for 10-player scenarios', () => {
+    const players = createPlayers(10)
     const plan = generateMatchPlan({
       players,
       periodMinutes: 15,
       formation: '2-3-1',
       chunkMinutes: 5,
-      lockedGoalkeeperIds: [players[0].id, players[4].id, players[8].id],
+      lockedGoalkeeperIds: [players[0].id, players[3].id, players[7].id],
       seed: 5150,
       attempts: 24,
     })
@@ -509,8 +526,40 @@ describe('generateMatchPlan', () => {
 
       expect(plan.score).toBe(normalized.totalScore)
       expect(legacy.totalScore).not.toBe(normalized.totalScore)
-      expectNoConsecutiveBenchWindows(plan, players)
+      if (playerCount <= 10) {
+        expectNoConsecutiveBenchWindows(plan, players)
+      }
     }
+  })
+
+  it('keeps hard bench protection for 8-player scenarios', () => {
+    const players = createPlayers(8)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 10,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1008,
+      attempts: 24,
+    })
+
+    expectNoConsecutiveBenchWindows(plan, players)
+  })
+
+  it('allows at least one repeated bench window in a 12-player 5-minute scenario', () => {
+    const players = createPlayers(12)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1012,
+      attempts: 72,
+    })
+
+    expect(hasConsecutiveBenchWindows(plan, players)).toBe(true)
   })
 })
 
@@ -598,6 +647,59 @@ describe('scheduler scoring calibration', () => {
     expect(worseRotation.componentScores.groupBreadthPenalty).toBeGreaterThan(
       cleanerRotation.componentScores.groupBreadthPenalty,
     )
+  })
+
+  it('keeps normalized fragmentation below half of the total score in a 12-player 5-minute regression', () => {
+    const players = createPlayers(12)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1012,
+      attempts: 72,
+    })
+    const normalized = getPlanScoreBreakdown(plan, 'normalized')
+
+    expect(normalized.componentScores.fragmentedMinutesPenalty).toBeLessThanOrEqual(
+      normalized.totalScore * 0.5,
+    )
+  })
+
+  it('does not let expected 12-player double-bench windows dominate the normalized score', () => {
+    const players = createPlayers(12)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1012,
+      attempts: 72,
+    })
+    const normalized = getPlanScoreBreakdown(plan, 'normalized')
+
+    expect(normalized.componentScores.consecutiveBenchPenalty).toBeLessThanOrEqual(
+      normalized.totalScore * 0.25,
+    )
+  })
+
+  it('accepts one chunk of minute spread as the floor for 9-player 20-minute matches with 10-minute chunks', () => {
+    const players = createPlayers(9)
+    const chunkMinutes = 10
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 1009,
+      attempts: 24,
+    })
+    const normalized = getPlanScoreBreakdown(plan, 'normalized')
+
+    expect(normalized.components.minuteSpreadPenalty).toBeLessThanOrEqual(chunkMinutes)
   })
 })
 

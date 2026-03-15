@@ -152,6 +152,11 @@ Kalibrering i v1:
 #### Beroenden / risker
 Beteende kan skifta mellan seeds. Implementationen ska säkra detta med regressionsfall och viktkalibrering efter normalisering.
 
+Notering efter implementation:
+
+- fragmenteringsnormaliseringen inkluderar en size-aware allowance som kompenserar för strukturellt extra bänk-/övergångsbelastning i större trupper
+- vid 9 spelare, 20-minutersperioder och 10-minuters chunks kan ett minutspridningsgolv på ett helt chunk vara oundvikligt och ska inte i sig tolkas som ett separat schedulerfel
+
 ### B4 / P2: Dynamiskt antal optimeringsförsök
 ID: B4  
 Prioritet: P2  

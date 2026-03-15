@@ -142,7 +142,7 @@ const NORMALIZED_SCORING_PROFILE: ScoringProfile = {
     repeatPenalty: 12,
     periodStartPenalty: 10,
     consecutiveBenchPenalty: 12,
-    fragmentedMinutesPenalty: 11,
+    fragmentedMinutesPenalty: 3,
     groupBreadthPenalty: 11,
     periodStartVariationPenalty: 1,
   },
@@ -789,7 +789,7 @@ function selectPeriodStarters({
     candidates.push({ playerId, score })
   }
 
-  return selectPlayersWithBenchProtection(candidates, histories, positions.length)
+  return selectPlayersWithBenchProtection(candidates, histories, positions.length, playerIds.length)
 }
 
 function selectInPeriodPlayers({
@@ -824,31 +824,39 @@ function selectInPeriodPlayers({
     const futureAfterCurrent = remainingOpportunities - chunk.durationMinutes
     const criticalGap = Math.max(remainingNeed - futureAfterCurrent, 0)
     const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
+    const shortWindowSinglePlayProtection =
+      playerIds.length <= 10 && chunk.durationMinutes <= 5 && history.playStreak === 1 ? 110 : 0
     const score =
       criticalGap * 100 +
       Math.max(remainingNeed, 0) * 12 +
       shortagePressure * 30 +
       history.benchStreak * 120 -
       history.actualMinutes * 0.55 +
+      shortWindowSinglePlayProtection +
       Math.min(history.playStreak, 2) * 20 +
       rng() * 0.01
 
     candidates.push({ playerId, score })
   }
 
-  return selectPlayersWithBenchProtection(candidates, histories, positions.length)
+  return selectPlayersWithBenchProtection(candidates, histories, positions.length, playerIds.length)
 }
 
 function selectPlayersWithBenchProtection(
   candidates: Array<{ playerId: string; score: number }>,
   histories: Record<string, PlayerHistory>,
   requiredCount: number,
+  playerCount: number,
 ) {
+  candidates.sort((left, right) => right.score - left.score)
+
+  if (playerCount >= 11) {
+    const selected = candidates.slice(0, requiredCount).map((candidate) => candidate.playerId)
+    return selected.length === requiredCount ? selected : null
+  }
+
   const mandatory = candidates.filter((candidate) => histories[candidate.playerId].benchStreak > 0)
   const optional = candidates.filter((candidate) => histories[candidate.playerId].benchStreak === 0)
-
-  mandatory.sort((left, right) => right.score - left.score)
-  optional.sort((left, right) => right.score - left.score)
 
   if (mandatory.length >= requiredCount) {
     return mandatory.slice(0, requiredCount).map((candidate) => candidate.playerId)
@@ -1061,6 +1069,12 @@ function buildScoreComponents(
   periods: PeriodPlan[],
   playerCount: number,
 ) {
+  const benchSlots = Math.max(playerCount - 7, 0)
+  const allowedTransitions = 2 + Math.max(benchSlots - 1, 0)
+  const allowedShortPlayBlocks = Math.max(benchSlots - 2, 0)
+  const allowedConsecutiveBenchWindows = Math.max(playerCount - 10, 0)
+  const allowedBenchViolationWeight = allowedConsecutiveBenchWindows * 2
+  const allowedBenchStreak = 1 + Math.min(allowedConsecutiveBenchWindows, 1)
   const targetPenalty = Object.entries(targets).reduce(
     (total, [playerId, target]) => total + Math.abs(histories[playerId].actualMinutes - target),
     0,
@@ -1085,13 +1099,18 @@ function buildScoreComponents(
   const consecutiveBenchPenalty = Object.values(histories).reduce((total, history) => {
     return (
       total +
-      history.consecutiveBenchViolations * 900 +
-      history.benchViolationWeight * 220 +
-      Math.max(history.maxBenchStreak - 1, 0) * 350
+      Math.max(history.consecutiveBenchViolations - allowedConsecutiveBenchWindows, 0) * 900 +
+      Math.max(history.benchViolationWeight - allowedBenchViolationWeight, 0) * 220 +
+      Math.max(history.maxBenchStreak - allowedBenchStreak, 0) * 350
     )
   }, 0)
   const fragmentedMinutesPenalty = Object.values(histories).reduce((total, history) => {
-    return total + history.shortPlayBlocks * 140 + Math.max(history.stateTransitions - 2, 0) * 24
+    // Larger squads inherently create more bench/load transitions; only score the excess above that baseline.
+    return (
+      total +
+      Math.max(history.shortPlayBlocks - allowedShortPlayBlocks, 0) * 140 +
+      Math.max(history.stateTransitions - allowedTransitions, 0) * 24
+    )
   }, 0)
   const groupBreadthPenalty = Object.values(histories).reduce((total, history) => {
     if (history.outfieldMinutes <= 10) {
