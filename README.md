@@ -51,11 +51,81 @@ Kor tester:
 npm test
 ```
 
+Kor scenarior for live-handelser:
+
+```bash
+npm run scenarios:live
+```
+
 Forhandsgranska produktionsbygget lokalt:
 
 ```bash
 npm run preview
 ```
+
+## Scenario-simulering
+
+Skriptet `npm run scenarios:live` kor ett fast set realistiska matchsituationer for live-flodet `Tillfalligt ute`.
+
+Det gor fyra saker i ett steg:
+
+- simulerar flera vanliga matchsituationer
+- kor lokal validering av minuter, banktid, fairness-targets och chunk-splits
+- skriver en JSON-artefakt for vidare automation
+- skriver en Markdown-rapport som ar forberedd for AI-granskning
+
+Artefakter sparas har:
+
+- `output/scenarios/live/latest.json`
+- `output/scenarios/live/latest.md`
+
+Du kan valja en annan output-katalog:
+
+```bash
+npm run scenarios:live -- --output-dir /tmp/eik-scenarios
+```
+
+### Vad scenarierna testar
+
+Skriptet kor ett kuraterat set av matchfall, till exempel:
+
+- en spelare blir tillfalligt ute mitt i perioden
+- en spelare blir tillfalligt ute och kommer tillbaka snabbt
+- ersattaren blir ocksa tillfalligt ute
+- en handelse sent i ett byteblock
+- en handelse precis fore periodbyte
+- en situation med mycket fa tillgangliga avbytare
+
+### Hur man laser resultatet
+
+Terminalen visar `PASS` eller `WARN` per scenario.
+
+- `PASS` betyder att scenariot gick igenom bade hard validering och den lokala rimlighetskontrollen
+- `WARN` betyder att harda invariants fortfarande haller, men att scenariot ser mindre snyggt ut enligt lokal heuristik
+
+Kommandot returnerar felkod bara om harda invariants bryts.
+
+### Hur man anvander rapporten for AI-validering
+
+Det enklaste ar att oppna `output/scenarios/live/latest.md` och ga till sektionen `Forberedd AI-prompt` under det scenario du vill granska.
+
+1. Kopiera prompten.
+2. Klistra in den i ChatGPT eller annan modell.
+3. Be modellen svara punkt for punkt pa checklistan.
+
+Exempel:
+
+```text
+Granska detta scenario.
+Svara pa varje checklistpunkt separat.
+Markera varje punkt som Pass, Fail eller Unclear.
+Avsluta med:
+- overgripande bedomning
+- misstankta problem
+- konkreta forbattringsforslag
+```
+
+Om du vill bygga automation senare kan du i stallet lasa `output/scenarios/live/latest.json` och skicka `scenarios[].ai.input.prompt` eller hela `scenarios[].ai.input` till ett API.
 
 ## Teknikstack
 

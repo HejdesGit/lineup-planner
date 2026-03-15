@@ -1,7 +1,7 @@
 import type { MatchPlan } from './types'
 
 export const ACTIVE_MATCH_TIMER_STORAGE_KEY = 'eik.active-match-timer.v1'
-const STORED_ACTIVE_MATCH_TIMER_VERSION = 2
+const STORED_ACTIVE_MATCH_TIMER_VERSION = 3
 type StoredActiveMatchTimerStatus = 'running' | 'paused' | 'finished'
 
 export interface StoredActiveMatchTimer {

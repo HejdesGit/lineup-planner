@@ -1,4 +1,9 @@
-import { FORMATION_PRESETS, PERIOD_COUNT, type GeneratedConfig } from './types'
+import {
+  FORMATION_PRESETS,
+  PERIOD_COUNT,
+  type GeneratedConfig,
+  type LiveAdjustmentEvent,
+} from './types'
 
 export const LINEUP_SHARE_QUERY_PARAM = 'lineup'
 
@@ -13,20 +18,28 @@ interface LineupSnapshotV1 {
   o?: Record<string, Record<string, string>>
 }
 
+interface LineupSnapshotV2 extends Omit<LineupSnapshotV1, 'v'> {
+  v: 2
+  le?: LiveAdjustmentEvent[]
+}
+
 export interface DecodedLineupSnapshot {
   config: GeneratedConfig
   overrides: Record<string, Record<string, string>>
+  liveEvents: LiveAdjustmentEvent[]
 }
 
 export function encodeLineupSnapshot({
   config,
   overrides,
+  liveEvents,
 }: {
   config: GeneratedConfig
   overrides: Record<string, Record<string, string>>
+  liveEvents?: LiveAdjustmentEvent[]
 }) {
-  const payload: LineupSnapshotV1 = {
-    v: 1,
+  const payload: LineupSnapshotV2 = {
+    v: 2,
     p: config.playerNames,
     pm: config.periodMinutes,
     f: config.formation,
@@ -34,16 +47,19 @@ export function encodeLineupSnapshot({
     gk: config.goalkeeperSelections,
     s: config.seed,
     ...(Object.keys(overrides).length > 0 ? { o: overrides } : {}),
+    ...(liveEvents && liveEvents.length > 0 ? { le: liveEvents } : {}),
   }
 
   return encodeBase64Url(JSON.stringify(payload))
 }
 
 export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnapshot {
-  const parsed = JSON.parse(decodeBase64Url(encodedSnapshot)) as Partial<LineupSnapshotV1>
+  const parsed = JSON.parse(decodeBase64Url(encodedSnapshot)) as
+    | Partial<LineupSnapshotV1>
+    | Partial<LineupSnapshotV2>
 
   if (
-    parsed.v !== 1 ||
+    (parsed.v !== 1 && parsed.v !== 2) ||
     !Array.isArray(parsed.p) ||
     parsed.p.length < 8 ||
     parsed.p.length > 12 ||
@@ -61,6 +77,10 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
   }
 
   if (parsed.o && !isOverrideMap(parsed.o)) {
+    throw new Error('Ogiltig delningslänk.')
+  }
+
+  if (parsed.v === 2 && parsed.le && !isLiveEventList(parsed.le)) {
     throw new Error('Ogiltig delningslänk.')
   }
 
@@ -82,6 +102,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
       seed,
     },
     overrides: parsed.o ?? {},
+    liveEvents: parsed.v === 2 ? parsed.le ?? [] : [],
   }
 }
 
@@ -117,6 +138,35 @@ function isOverrideMap(value: unknown): value is Record<string, Record<string, s
 
     return Object.entries(assignments).every(
       ([slotId, playerId]) => slotId.length > 0 && typeof playerId === 'string' && playerId.length > 0,
+    )
+  })
+}
+
+function isLiveEventList(value: unknown): value is LiveAdjustmentEvent[] {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  return value.every((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return false
+    }
+
+    const event = entry as Partial<LiveAdjustmentEvent>
+    const status = event.status
+
+    return (
+      (event.type === 'injury' || event.type === 'temporary-out' || event.type === 'return') &&
+      typeof event.period === 'number' &&
+      Number.isInteger(event.period) &&
+      event.period >= 1 &&
+      typeof event.minute === 'number' &&
+      Number.isFinite(event.minute) &&
+      typeof event.playerId === 'string' &&
+      event.playerId.length > 0 &&
+      typeof event.replacementPlayerId === 'string' &&
+      event.replacementPlayerId.length > 0 &&
+      (status === undefined || status === 'injured' || status === 'temporarily-out')
     )
   })
 }

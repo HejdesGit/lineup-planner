@@ -137,7 +137,7 @@ describe('matchTimer', () => {
     const pausedTimer = pauseMatchTimer(runningTimer, 1_000 + 12 * 60_000)
 
     expect(pausedTimer).toEqual({
-      version: 2,
+      version: 3,
       lineupSnapshot: 'snapshot-token',
       status: 'paused',
       startedAt: null,
@@ -169,7 +169,7 @@ describe('matchTimer', () => {
     expect(
       parseStoredActiveMatchTimer(
         JSON.stringify({
-          version: 2,
+          version: 3,
           lineupSnapshot: 'snapshot-token',
           status: 'running',
           startedAt: 12345,
@@ -179,7 +179,7 @@ describe('matchTimer', () => {
         }),
       ),
     ).toEqual({
-      version: 2,
+      version: 3,
       lineupSnapshot: 'snapshot-token',
       status: 'running',
       startedAt: 12345,
@@ -191,7 +191,7 @@ describe('matchTimer', () => {
     expect(
       parseStoredActiveMatchTimer(
         JSON.stringify({
-          version: 2,
+          version: 3,
           lineupSnapshot: 'snapshot-token',
           status: 'paused',
           startedAt: null,
@@ -201,7 +201,7 @@ describe('matchTimer', () => {
         }),
       ),
     ).toEqual({
-      version: 2,
+      version: 3,
       lineupSnapshot: 'snapshot-token',
       status: 'paused',
       startedAt: null,
@@ -221,7 +221,7 @@ describe('matchTimer', () => {
     expect(
       isStoredActiveMatchTimerCompatible(
         {
-          version: 2,
+          version: 3,
           lineupSnapshot: 'snapshot-token',
           status: 'running',
           startedAt: 12345,
@@ -236,7 +236,7 @@ describe('matchTimer', () => {
     expect(
       isStoredActiveMatchTimerCompatible(
         {
-          version: 2,
+          version: 3,
           lineupSnapshot: 'snapshot-token',
           status: 'paused',
           startedAt: null,

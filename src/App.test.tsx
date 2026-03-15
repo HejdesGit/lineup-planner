@@ -8,7 +8,7 @@ import {
   serializeStoredActiveMatchTimer,
 } from './lib/matchTimer'
 import { createBoardAssignments, swapBoardAssignments } from './lib/planOverrides'
-import { encodeLineupSnapshot } from './lib/share'
+import { decodeLineupSnapshot, encodeLineupSnapshot } from './lib/share'
 import { generateMatchPlan } from './lib/scheduler'
 import type { GeneratedConfig, Player } from './lib/types'
 
@@ -340,7 +340,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
     expect(getStoredMatchTimer()).toEqual({
-      version: 2,
+      version: 3,
       lineupSnapshot: expect.any(String),
       status: 'running',
       startedAt: Date.now(),
@@ -440,7 +440,7 @@ describe('App', () => {
     fireEvent.click(pauseButton)
 
     expect(getStoredMatchTimer()).toEqual({
-      version: 2,
+      version: 3,
       lineupSnapshot: expect.any(String),
       status: 'paused',
       startedAt: null,
@@ -506,7 +506,7 @@ describe('App', () => {
     window.localStorage.setItem(
       ACTIVE_MATCH_TIMER_STORAGE_KEY,
       serializeStoredActiveMatchTimer({
-        version: 2,
+        version: 3,
         lineupSnapshot: otherShareToken,
         status: 'running',
         startedAt: 12345,
@@ -636,6 +636,96 @@ describe('App', () => {
       behavior: 'smooth',
       block: 'center',
     })
+  })
+
+  it('marks a live player as temporarily out, recommends a replacement, and can return the player immediately', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!activePeriodCard) {
+      throw new Error('Aktivt periodkort saknas i testet.')
+    }
+
+    const injuryButton = within(activePeriodCard).getAllByRole('button', {
+      name: /markera .* som tillfälligt ute/i,
+    })[0]
+    const playerName = (injuryButton.getAttribute('aria-label') ?? '')
+      .replace(/^Markera /i, '')
+      .replace(/ som tillfälligt ute$/i, '')
+
+    await user.click(injuryButton)
+
+    expect(within(activePeriodCard).getByText(new RegExp(`${playerName} är tillfälligt ute`, 'i'))).toBeInTheDocument()
+    expect(within(activePeriodCard).getByText(/resten av matchen räknas om direkt/i)).toBeInTheDocument()
+
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    const returnButton = within(activePeriodCard).getByRole('button', {
+      name: new RegExp(`${playerName}.*klar för spel`, 'i'),
+    })
+    expect(returnButton).toBeInTheDocument()
+
+    await user.click(returnButton)
+
+    expect(within(activePeriodCard).getByText(new RegExp(`${playerName} är klar för spel`, 'i'))).toBeInTheDocument()
+
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    expect(
+      within(activePeriodCard).queryByRole('button', {
+        name: new RegExp(`${playerName}.*klar för spel`, 'i'),
+      }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('persists live temporarily-out events in the running timer snapshot and restores them after reload', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!activePeriodCard) {
+      throw new Error('Aktivt periodkort saknas i testet.')
+    }
+
+    const injuryButton = within(activePeriodCard).getAllByRole('button', {
+      name: /markera .* som tillfälligt ute/i,
+    })[0]
+    const playerName = (injuryButton.getAttribute('aria-label') ?? '')
+      .replace(/^Markera /i, '')
+      .replace(/ som tillfälligt ute$/i, '')
+
+    await user.click(injuryButton)
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    await waitFor(() => {
+      expect(getStoredMatchTimer()).not.toBeNull()
+    })
+
+    const storedTimer = getStoredMatchTimer()!
+
+    expect(decodeLineupSnapshot(storedTimer.lineupSnapshot).liveEvents).toHaveLength(1)
+
+    cleanup()
+    setUrl('/')
+    render(<App />)
+
+    const restoredPeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!restoredPeriodCard) {
+      throw new Error('Återställt periodkort saknas i testet.')
+    }
+
+    expect(
+      within(restoredPeriodCard).getByRole('button', {
+        name: new RegExp(`${playerName}.*klar för spel`, 'i'),
+      }),
+    ).toBeInTheDocument()
   })
 
 })

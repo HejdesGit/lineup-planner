@@ -35,6 +35,33 @@ export interface ChunkSubstitution {
   position: OutfieldPosition
 }
 
+export type PlayerAvailabilityStatus = 'available' | 'injured' | 'temporarily-out'
+export type LiveAdjustmentEventType = 'injury' | 'temporary-out' | 'return'
+
+export interface LiveAdjustmentEvent {
+  type: LiveAdjustmentEventType
+  period: number
+  minute: number
+  playerId: string
+  replacementPlayerId: string
+  status?: Exclude<PlayerAvailabilityStatus, 'available'>
+}
+
+export type LiveAvailabilityState = Record<string, PlayerAvailabilityStatus>
+
+export interface LiveRecommendation {
+  playerId: string
+  position: OutfieldPosition
+  score: number
+  reason: string
+  fairnessGap: number
+  benchPriority: number
+  rotationPenalty: number
+  goalkeeperPenalty: number
+  goalkeeperPenaltyApplied: boolean
+  futureGoalkeeperMinutes: number
+}
+
 export interface Player {
   id: string
   name: string
@@ -96,6 +123,7 @@ export interface MatchPlan {
   goalkeepers: string[]
   lockedGoalkeepers: Array<string | null>
   targets: Record<string, number>
+  fairnessTargets: Record<string, number>
   periods: PeriodPlan[]
   summaries: PlayerSummary[]
 }

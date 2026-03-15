@@ -77,6 +77,7 @@ interface CandidatePlan {
   periods: PeriodPlan[]
   summaries: PlayerSummary[]
   targets: Record<string, number>
+  fairnessTargets: Record<string, number>
   goalkeepers: string[]
 }
 
@@ -292,6 +293,7 @@ export function generateMatchPlan({
     goalkeepers: best.goalkeepers,
     lockedGoalkeepers: normalizeLockedGoalkeepers(lockedGoalkeeperIds),
     targets: best.targets,
+    fairnessTargets: best.fairnessTargets,
     periods: best.periods,
     summaries: best.summaries,
   }
@@ -529,6 +531,7 @@ function buildCandidatePlan(
     periods,
     summaries,
     targets,
+    fairnessTargets: targets,
     goalkeepers,
   }
 }
@@ -1197,11 +1200,17 @@ export function scoreComponentsToTotal(
 }
 
 export function getPlanScoreBreakdown(
-  plan: Pick<MatchPlan, 'periods' | 'summaries' | 'targets'>,
+  plan: Pick<MatchPlan, 'periods' | 'summaries' | 'targets'> & Partial<Pick<MatchPlan, 'fairnessTargets'>>,
   profileName: ScoringProfileName = ACTIVE_SCORING_PROFILE.name,
 ) {
   const histories = createHistoriesFromPlan(plan)
-  const components = buildScoreComponents(plan.targets, histories, plan.periods, plan.summaries.length)
+  const comparisonTargets = plan.fairnessTargets ?? plan.targets
+  const components = buildScoreComponents(
+    comparisonTargets,
+    histories,
+    plan.periods,
+    plan.summaries.length,
+  )
 
   return scoreComponentsToTotal(components, profileName)
 }

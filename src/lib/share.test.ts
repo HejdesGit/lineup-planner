@@ -42,6 +42,46 @@ describe('share codec', () => {
         B1: 'player-8',
       },
     })
+    expect(decoded.liveEvents).toEqual([])
+  })
+
+  it('round-trips live adjustment events in v2 snapshots', () => {
+    const config: GeneratedConfig = {
+      playerInput: 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo',
+      playerNames: ['Ada', 'Bea', 'Cleo', 'Dani', 'Eli', 'Fia', 'Gio', 'Hugo'],
+      periodMinutes: 15,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      goalkeeperSelections: ['Ada', '', 'Bea'],
+      seed: 999,
+    }
+
+    const encoded = encodeLineupSnapshot({
+      config,
+      overrides: {},
+      liveEvents: [
+        {
+          type: 'temporary-out',
+          period: 2,
+          minute: 10,
+          playerId: 'player-3',
+          replacementPlayerId: 'player-8',
+          status: 'temporarily-out',
+        },
+      ],
+    })
+    const decoded = decodeLineupSnapshot(encoded)
+
+    expect(decoded.liveEvents).toEqual([
+      {
+        type: 'temporary-out',
+        period: 2,
+        minute: 10,
+        playerId: 'player-3',
+        replacementPlayerId: 'player-8',
+        status: 'temporarily-out',
+      },
+    ])
   })
 
   it('builds a share url with a single lineup query param', () => {

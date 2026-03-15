@@ -31,7 +31,12 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
-import { Lock, LockOpen } from 'lucide-react'
+import { AlertTriangle, Lock, LockOpen, UserMinus, UserPlus } from 'lucide-react'
+import {
+  applyLiveAdjustmentEvents,
+  createInitialAvailabilityState,
+  getLiveRecommendations,
+} from './lib/liveAdjustments'
 import { generateMatchPlan } from './lib/scheduler'
 import {
   GOALKEEPER_SLOT,
@@ -74,6 +79,9 @@ import {
   type GeneratedConfig,
   type GoalkeeperSelections,
   type Lineup,
+  type LiveAdjustmentEvent,
+  type LiveAvailabilityState,
+  type LiveRecommendation,
   type MatchPlan,
   type OutfieldPosition,
   type PeriodPlan,
@@ -167,10 +175,25 @@ interface InitialAppState {
   generatedConfig: GeneratedConfig
   plan: MatchPlan | null
   periodOverrides: PeriodBoardOverrides
+  liveEvents: LiveAdjustmentEvent[]
   shouldSyncShareUrl: boolean
   selectedTimerPeriod: number
   activeMatchTimer: StoredActiveMatchTimer | null
 }
+
+type LiveEventDraft =
+  | {
+      type: 'unavailable'
+      playerId: string
+      recommendations: LiveRecommendation[]
+      selectedReplacementPlayerId: string | null
+    }
+  | {
+      type: 'return'
+      playerId: string
+      recommendations: LiveRecommendation[]
+      selectedReplacementPlayerId: string | null
+    }
 
 function formReducer(state: FormState, action: FormAction): FormState {
   switch (action.type) {
@@ -209,12 +232,14 @@ function App() {
   const [generatedConfig, setGeneratedConfig] = useState(initialState.generatedConfig)
   const [plan, setPlan] = useState<MatchPlan | null>(initialState.plan)
   const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
+  const [liveEvents, setLiveEvents] = useState<LiveAdjustmentEvent[]>(initialState.liveEvents)
   const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
   const [selectedTimerPeriod, setSelectedTimerPeriod] = useState(initialState.selectedTimerPeriod)
   const [activeMatchTimer, setActiveMatchTimer] = useState<StoredActiveMatchTimer | null>(
     initialState.activeMatchTimer,
   )
   const [timerNow, setTimerNow] = useState(() => Date.now())
+  const [liveError, setLiveError] = useState<string | null>(null)
 
   const rosterNames = useMemo(() => getRosterNames(formState.playerInput), [formState.playerInput])
   const playerOptions = rosterNames
@@ -222,10 +247,22 @@ function App() {
     () => (plan ? normalizePeriodOverrides(plan, periodOverrides) : {}),
     [periodOverrides, plan],
   )
-  const displayPlan = useMemo(
+  const overridePlan = useMemo(
     () => (plan ? applyPeriodOverrides(plan, normalizedOverrides) : null),
     [normalizedOverrides, plan],
   )
+  const livePlanState = useMemo(
+    () =>
+      overridePlan
+        ? applyLiveAdjustmentEvents({
+            plan: overridePlan,
+            events: liveEvents,
+          })
+        : null,
+    [liveEvents, overridePlan],
+  )
+  const displayPlan = livePlanState?.plan ?? overridePlan
+  const liveAvailability = livePlanState?.availability ?? (plan ? createInitialAvailabilityState(plan) : null)
 
   const playerNameById = displayPlan
     ? Object.fromEntries(displayPlan.summaries.map((summary) => [summary.playerId, summary.name]))
@@ -234,13 +271,14 @@ function App() {
     () =>
       plan
         ? encodeLineupSnapshot({
-          config: generatedConfig,
-          overrides: serializePeriodOverrides(normalizedOverrides),
-        })
+            config: generatedConfig,
+            overrides: serializePeriodOverrides(normalizedOverrides),
+            liveEvents,
+          })
         : null,
-    [generatedConfig, normalizedOverrides, plan],
+    [generatedConfig, liveEvents, normalizedOverrides, plan],
   )
-  const matchTimeline = useMemo(() => (plan ? buildMatchTimeline(plan) : null), [plan])
+  const matchTimeline = useMemo(() => (displayPlan ? buildMatchTimeline(displayPlan) : null), [displayPlan])
   const matchProgress = useMemo(
     () =>
       matchTimeline
@@ -260,12 +298,12 @@ function App() {
       return
     }
 
-    const nextUrl = createLineupShareUrl(generatedConfig, normalizedOverrides)
+    const nextUrl = createLineupShareUrl(generatedConfig, normalizedOverrides, liveEvents)
 
     if (window.location.href !== nextUrl) {
       window.history.replaceState(null, '', nextUrl)
     }
-  }, [generatedConfig, normalizedOverrides, plan, shouldSyncShareUrl])
+  }, [generatedConfig, liveEvents, normalizedOverrides, plan, shouldSyncShareUrl])
 
   useEffect(() => {
     if (!matchTimeline || !activeMatchTimer || activeMatchTimer.status !== 'running') {
@@ -342,10 +380,12 @@ function App() {
         setGeneratedConfig(nextGeneratedConfig)
         setPlan(nextPlan)
         setPeriodOverrides({})
+        setLiveEvents([])
         setShouldSyncShareUrl(true)
         setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
         setActiveMatchTimer(null)
         setTimerNow(Date.now())
+        setLiveError(null)
       })
     } catch (error) {
       dispatch({
@@ -355,10 +395,12 @@ function App() {
       window.history.replaceState(null, '', clearLineupShareUrl(window.location.href))
       setPlan(null)
       setPeriodOverrides({})
+      setLiveEvents([])
       setShouldSyncShareUrl(false)
       setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
       setActiveMatchTimer(null)
       setTimerNow(Date.now())
+      setLiveError(null)
     }
   }
 
@@ -423,7 +465,7 @@ function App() {
       return
     }
 
-    const shareUrl = createLineupShareUrl(generatedConfig, normalizedOverrides)
+    const shareUrl = createLineupShareUrl(generatedConfig, normalizedOverrides, liveEvents)
     window.history.replaceState(null, '', shareUrl)
     setShouldSyncShareUrl(true)
     window.open(
@@ -431,6 +473,68 @@ function App() {
       '_blank',
       'noopener,noreferrer',
     )
+  }
+
+  const handleApplyLiveEvent = ({
+    playerId,
+    replacementPlayerId,
+    status,
+  }: {
+    playerId: string
+    replacementPlayerId: string
+    status: 'temporarily-out' | 'return'
+  }) => {
+    if (!displayPlan || !liveAvailability || !matchTimeline || !activeMatchTimer) {
+      return
+    }
+
+    const now = Date.now()
+    const liveProgress = getMatchProgress({
+      timeline: matchTimeline,
+      timer: activeMatchTimer,
+      now,
+    })
+    const activePeriod = liveProgress.activePeriod
+
+    if (!activePeriod) {
+      return
+    }
+
+    const minute = roundMinuteValue(liveProgress.elapsedMs / 60_000)
+
+    try {
+      const nextEvent: LiveAdjustmentEvent =
+        status === 'return'
+          ? {
+              type: 'return',
+              period: activePeriod,
+              minute,
+              playerId,
+              replacementPlayerId,
+            }
+          : {
+              type: 'temporary-out',
+              period: activePeriod,
+              minute,
+              playerId,
+              replacementPlayerId,
+              status: 'temporarily-out',
+            }
+
+      if (overridePlan) {
+        applyLiveAdjustmentEvents({
+          plan: overridePlan,
+          events: [...liveEvents, nextEvent],
+        })
+      }
+
+      setLiveEvents((current) => [...current, nextEvent])
+      setShouldSyncShareUrl(true)
+      setTimerNow(now)
+      setLiveError(null)
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : 'Live-bytet kunde inte genomföras.')
+    }
   }
 
   return (
@@ -466,25 +570,41 @@ function App() {
               onSelectTimerPeriod={handleSelectTimerPeriod}
             />
 
+            {liveError ? (
+              <section className="rounded-[1.35rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
+                {liveError}
+              </section>
+            ) : null}
+
             <section className="grid gap-5 xl:grid-cols-3">
               {displayPlan.periods.map((period, index) => (
                 <PeriodCard
                   key={`${displayPlan.seed}-${period.period}`}
+                  plan={displayPlan}
                   period={period}
                   boardAssignments={
                     normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
                   }
+                  availability={liveAvailability ?? createInitialAvailabilityState(displayPlan)}
                   nameById={playerNameById}
                   defaultLockedSlots={
                     displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
                   }
                   isActivePeriod={matchProgress?.activePeriod === period.period}
+                  activeMinute={
+                    matchProgress?.activePeriod === period.period &&
+                    (matchProgress.status === 'running' || matchProgress.status === 'paused')
+                      ? roundMinuteValue(matchProgress.elapsedMs / 60_000)
+                      : null
+                  }
                   activeChunkIndex={
                     matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
                   }
                   periodState={getPeriodState(period.period, matchProgress)}
+                  onApplyLiveEvent={handleApplyLiveEvent}
                   onSwapSlots={(sourceSlot, targetSlot) => {
                     setShouldSyncShareUrl(true)
+                    setLiveError(null)
                     setPeriodOverrides((current) => {
                       const currentAssignments =
                         normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
@@ -1082,7 +1202,9 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="rounded-2xl bg-clay-400 px-3 py-2 text-right text-clay-900">
-                      <p className="font-display text-2xl font-black">{minuteBreakdown.totalMinutes}</p>
+                      <p className="font-display text-2xl font-black">
+                        {formatMinuteQuantity(minuteBreakdown.totalMinutes)}
+                      </p>
                       <p className="font-mono text-[10px] uppercase tracking-[0.22em]">totalt</p>
                     </div>
                     <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-stone-300">
@@ -1097,7 +1219,7 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                       MV
                     </dt>
                     <dd className="mt-1 text-lg font-semibold text-white">
-                      {minuteBreakdown.goalkeeperMinutes} min
+                      {formatMinuteQuantity(minuteBreakdown.goalkeeperMinutes)} min
                     </dd>
                   </div>
                   <div className="rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-3">
@@ -1105,14 +1227,16 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                       Utespelare
                     </dt>
                     <dd className="mt-1 text-lg font-semibold text-white">
-                      {minuteBreakdown.outfieldMinutes} min
+                      {formatMinuteQuantity(minuteBreakdown.outfieldMinutes)} min
                     </dd>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
                     <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
                       Bänktid
                     </dt>
-                    <dd className="mt-1 text-lg font-semibold text-white">{summary.benchMinutes} min</dd>
+                    <dd className="mt-1 text-lg font-semibold text-white">
+                      {formatMinuteQuantity(summary.benchMinutes)} min
+                    </dd>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
                     <dt className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
@@ -1125,8 +1249,9 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                 </dl>
 
                 <p className="mt-4 text-sm text-stone-300">
-                  MV: {minuteBreakdown.goalkeeperMinutes} min + Utespelare:{' '}
-                  {minuteBreakdown.outfieldMinutes} min = {minuteBreakdown.totalMinutes} min totalt
+                  MV: {formatMinuteQuantity(minuteBreakdown.goalkeeperMinutes)} min + Utespelare:{' '}
+                  {formatMinuteQuantity(minuteBreakdown.outfieldMinutes)} min ={' '}
+                  {formatMinuteQuantity(minuteBreakdown.totalMinutes)} min totalt
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -1156,10 +1281,22 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
 
               <div className="mt-5 border-t border-white/10 pt-4">
                 <div className="grid gap-3 sm:grid-cols-4">
-                  <DetailStat label="MV-tid" value={`${minuteBreakdown.goalkeeperMinutes} min`} />
-                  <DetailStat label="Utespelartid" value={`${minuteBreakdown.outfieldMinutes} min`} />
-                  <DetailStat label="Totaltid" value={`${minuteBreakdown.totalMinutes} min`} />
-                  <DetailStat label="Bänktid" value={`${summary.benchMinutes} min`} />
+                  <DetailStat
+                    label="MV-tid"
+                    value={`${formatMinuteQuantity(minuteBreakdown.goalkeeperMinutes)} min`}
+                  />
+                  <DetailStat
+                    label="Utespelartid"
+                    value={`${formatMinuteQuantity(minuteBreakdown.outfieldMinutes)} min`}
+                  />
+                  <DetailStat
+                    label="Totaltid"
+                    value={`${formatMinuteQuantity(minuteBreakdown.totalMinutes)} min`}
+                  />
+                  <DetailStat
+                    label="Bänktid"
+                    value={`${formatMinuteQuantity(summary.benchMinutes)} min`}
+                  />
                   <DetailStat
                     label="Startroller"
                     value={playerDetail.periods.map((period) => period.startStatus).join(' · ')}
@@ -1178,8 +1315,9 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
                             Period {periodDetail.period}
                           </p>
                           <p className="mt-1 text-sm font-semibold text-white">
-                            {periodDetail.totalMinutes} min totalt · {periodDetail.goalkeeperMinutes} min MV ·{' '}
-                            {periodDetail.outfieldMinutes} min utespelare
+                            {formatMinuteQuantity(periodDetail.totalMinutes)} min totalt ·{' '}
+                            {formatMinuteQuantity(periodDetail.goalkeeperMinutes)} min MV ·{' '}
+                            {formatMinuteQuantity(periodDetail.outfieldMinutes)} min utespelare
                           </p>
                         </div>
                         <div className="text-sm text-stone-300">
@@ -1220,21 +1358,33 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
 }
 
 function PeriodCard({
+  plan,
   period,
   boardAssignments,
+  availability,
   nameById,
   onSwapSlots,
+  onApplyLiveEvent,
   defaultLockedSlots,
   isActivePeriod,
+  activeMinute,
   activeChunkIndex,
   periodState,
 }: {
+  plan: MatchPlan
   period: PeriodPlan
   boardAssignments: Record<BoardSlotId, string>
+  availability: LiveAvailabilityState
   nameById: Record<string, string>
   onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
+  onApplyLiveEvent: (event: {
+    playerId: string
+    replacementPlayerId: string
+    status: 'temporarily-out' | 'return'
+  }) => void
   defaultLockedSlots: BoardSlotId[]
   isActivePeriod: boolean
+  activeMinute: number | null
   activeChunkIndex: number | null
   periodState: 'upcoming' | 'active' | 'completed'
 }) {
@@ -1282,6 +1432,76 @@ function PeriodCard({
     [activeSlot, boardAssignments, canPreviewSwap, overSlot],
   )
   const activePlayerName = activeSlot ? boardAssignments[activeSlot] : null
+  const activeChunk =
+    isActivePeriod && activeChunkIndex !== null ? period.chunks[activeChunkIndex] ?? null : null
+  const allPlayerIds = useMemo(
+    () => plan.summaries.map((summary) => summary.playerId),
+    [plan.summaries],
+  )
+  const availableBenchPlayerIds = useMemo(() => {
+    if (!activeChunk) {
+      return []
+    }
+
+    const activePlayerIds = new Set(activeChunk.activePlayerIds)
+    return allPlayerIds.filter(
+      (playerId) => !activePlayerIds.has(playerId) && availability[playerId] === 'available',
+    )
+  }, [activeChunk, allPlayerIds, availability])
+  const unavailablePlayers = useMemo(
+    () =>
+      plan.summaries.filter((summary) => {
+        const status = availability[summary.playerId]
+        return status !== 'available'
+      }),
+    [availability, plan.summaries],
+  )
+  const [liveDraftState, setLiveDraft] = useState<LiveEventDraft | null>(null)
+  const liveDraft = activeChunk && activeMinute !== null ? liveDraftState : null
+
+  const createUnavailableDraft = (playerId: string): LiveEventDraft | null => {
+    if (activeMinute === null) {
+      return null
+    }
+
+    const recommendations = getLiveRecommendations({
+      plan,
+      availability,
+      period: period.period,
+      minute: activeMinute,
+      playerId,
+      type: 'temporary-out',
+    })
+
+    return {
+      type: 'unavailable',
+      playerId,
+      recommendations,
+      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
+    }
+  }
+
+  const createReturnDraft = (playerId: string): LiveEventDraft | null => {
+    if (activeMinute === null) {
+      return null
+    }
+
+    const recommendations = getLiveRecommendations({
+      plan,
+      availability,
+      period: period.period,
+      minute: activeMinute,
+      playerId,
+      type: 'return',
+    })
+
+    return {
+      type: 'return',
+      playerId,
+      recommendations,
+      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
+    }
+  }
 
   const handleToggleLock = (slotId: BoardSlotId) => {
     if (manualLockedSlots.includes(slotId)) {
@@ -1312,6 +1532,19 @@ function PeriodCard({
     }
 
     onSwapSlots(sourceSlot, targetSlot)
+  }
+
+  const handleConfirmLiveDraft = () => {
+    if (!liveDraft || !liveDraft.selectedReplacementPlayerId) {
+      return
+    }
+
+    onApplyLiveEvent({
+      playerId: liveDraft.playerId,
+      replacementPlayerId: liveDraft.selectedReplacementPlayerId,
+      status: liveDraft.type === 'return' ? 'return' : 'temporarily-out',
+    })
+    setLiveDraft(null)
   }
 
   return (
@@ -1363,6 +1596,100 @@ function PeriodCard({
           setOverSlot(null)
         }}
       />
+
+      {activeChunk && activeMinute !== null ? (
+        <div className="mt-4 rounded-[1.2rem] border border-clay-300/20 bg-clay-500/10 p-3.5 sm:mt-5 sm:p-4">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-clay-100/75">
+                Live just nu
+              </p>
+              <p className="mt-1 text-sm text-white">
+                {formatMinuteRangeLabel(activeChunk.startMinute, activeChunk.endMinute)} · minut{' '}
+                {formatMinuteValue(activeMinute)}
+              </p>
+            </div>
+            <p className="text-sm text-stone-300">
+              Tillgänglig bänk: {availableBenchPlayerIds.length > 0
+                ? availableBenchPlayerIds.map((playerId) => nameById[playerId]).join(', ')
+                : 'Ingen'}
+            </p>
+          </div>
+
+          <LiveFormationBoard
+            formation={period.formation}
+            lineup={activeChunk.lineup}
+            nameById={nameById}
+            onMarkUnavailable={(playerId) => {
+              const nextDraft = createUnavailableDraft(playerId)
+              setLiveDraft(nextDraft)
+            }}
+          />
+
+          <div className="mt-3 rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">
+                  Ej tillgängliga nu
+                </p>
+                <p className="mt-1 text-sm text-stone-300">
+                  Spelare som är tillfälligt ute kan sättas tillbaka direkt härifrån.
+                </p>
+              </div>
+              <p className="text-sm text-white">
+                {unavailablePlayers.length > 0 ? `${unavailablePlayers.length} spelare` : 'Ingen just nu'}
+              </p>
+            </div>
+            {unavailablePlayers.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {unavailablePlayers.map((summary) => {
+                  return (
+                    <button
+                      key={`unavailable-${summary.playerId}`}
+                      type="button"
+                      onClick={() => {
+                        const nextDraft = createReturnDraft(summary.playerId)
+                        setLiveDraft(nextDraft)
+                      }}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white transition hover:border-clay-300/35 hover:bg-clay-500/10"
+                    >
+                      <span className="inline-flex rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
+                        Tillfälligt ute
+                      </span>
+                      <span>{summary.name}</span>
+                      <span className="inline-flex items-center gap-1 text-stone-300">
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Klar för spel
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-stone-400">Alla spelare är tillgängliga.</p>
+            )}
+          </div>
+
+          {liveDraft ? (
+            <LiveAdjustmentPanel
+              draft={liveDraft}
+              playerNameById={nameById}
+              onClose={() => setLiveDraft(null)}
+              onSelectReplacement={(playerId) =>
+                setLiveDraft((current) =>
+                  current
+                    ? {
+                        ...current,
+                        selectedReplacementPlayerId: playerId,
+                      }
+                    : current,
+                )
+              }
+              onConfirm={handleConfirmLiveDraft}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-3 sm:mt-5">
         {period.chunks.map((chunk, chunkIndex) => {
@@ -1676,6 +2003,176 @@ function FormationBoard({
         ) : null}
       </DragOverlay>
     </DndContext>
+  )
+}
+
+function LiveFormationBoard({
+  formation,
+  lineup,
+  nameById,
+  onMarkUnavailable,
+}: {
+  formation: FormationKey
+  lineup: Lineup
+  nameById: Record<string, string>
+  onMarkUnavailable: (playerId: string) => void
+}) {
+  return (
+    <div className="rounded-[1.1rem] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.14),_transparent_40%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-3">
+      <div className="space-y-3">
+        {FORMATION_PRESETS[formation].rows.map((row) => (
+          <div key={`live-row-${formation}-${row.join('-')}`} className="flex items-center justify-center gap-2">
+            {row.map((position) => {
+              const playerId = lineup[position]
+              const playerName = readLineupPlayer(lineup, position, nameById)
+
+              return (
+                <LivePositionBadge
+                  key={`live-position-${position}-${playerId ?? 'empty'}`}
+                  label={position}
+                  player={playerName}
+                  tone={getPositionTone(position)}
+                  onMarkUnavailable={playerId ? () => onMarkUnavailable(playerId) : undefined}
+                />
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LivePositionBadge({
+  label,
+  player,
+  tone,
+  onMarkUnavailable,
+}: {
+  label: string
+  player: string
+  tone: 'def' | 'mid' | 'att'
+  onMarkUnavailable?: () => void
+}) {
+  const toneClasses = {
+    def: 'border-sky-300/35 bg-[linear-gradient(180deg,rgba(56,189,248,0.18),rgba(12,74,110,0.28))] text-sky-50',
+    mid: 'border-emerald-300/35 bg-[linear-gradient(180deg,rgba(74,222,128,0.18),rgba(6,78,59,0.28))] text-emerald-50',
+    att: 'border-rose-300/35 bg-[linear-gradient(180deg,rgba(251,113,133,0.18),rgba(127,29,29,0.28))] text-rose-50',
+  }
+
+  return (
+    <div
+      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${toneClasses[tone]}`}
+    >
+      {onMarkUnavailable ? (
+        <button
+          type="button"
+          onClick={onMarkUnavailable}
+          className="absolute left-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white transition hover:border-white/20 hover:bg-black/40 sm:h-10 sm:w-10"
+          aria-label={`Markera ${player} som tillfälligt ute`}
+        >
+          <UserMinus className="h-4 w-4 sm:h-[1.05rem] sm:w-[1.05rem]" />
+        </button>
+      ) : null}
+      <p className="pointer-events-none font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
+      <p className="mt-2 text-sm font-semibold">{player}</p>
+    </div>
+  )
+}
+
+function LiveAdjustmentPanel({
+  draft,
+  playerNameById,
+  onClose,
+  onSelectReplacement,
+  onConfirm,
+}: {
+  draft: LiveEventDraft
+  playerNameById: Record<string, string>
+  onClose: () => void
+  onSelectReplacement: (playerId: string) => void
+  onConfirm: () => void
+}) {
+  const title =
+    draft.type === 'return'
+      ? `${playerNameById[draft.playerId]} är klar för spel`
+      : `${playerNameById[draft.playerId]} är tillfälligt ute`
+
+  return (
+    <div className="mt-3 rounded-[1rem] border border-clay-300/20 bg-black/25 p-3.5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-clay-100/80">
+            Live-byte
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-white">{title}</h3>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-stone-200 transition hover:border-white/20 hover:text-white"
+        >
+          Stäng
+        </button>
+      </div>
+
+      {draft.type === 'unavailable' ? (
+        <p className="mt-3 rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-sm text-stone-300">
+          Välj vem som ska ersätta spelaren medan den är tillfälligt ute.
+        </p>
+      ) : null}
+
+      <div className="mt-3 space-y-2">
+        {draft.recommendations.length > 0 ? (
+          draft.recommendations.map((recommendation, index) => (
+            <button
+              key={`live-recommendation-${draft.playerId}-${recommendation.playerId}-${recommendation.position}`}
+              type="button"
+              onClick={() => onSelectReplacement(recommendation.playerId)}
+              className={`flex w-full items-start justify-between gap-3 rounded-[0.95rem] border px-3 py-3 text-left transition ${
+                draft.selectedReplacementPlayerId === recommendation.playerId
+                  ? 'border-clay-300/35 bg-clay-500/10'
+                  : 'border-white/10 bg-white/5 hover:border-white/20'
+              }`}
+            >
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  {playerNameById[recommendation.playerId]}
+                  {index === 0 ? (
+                    <span className="ml-2 rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
+                      Rek
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-1 text-sm text-stone-300">{recommendation.reason}</p>
+              </div>
+              <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-stone-300">
+                {recommendation.position}
+              </span>
+            </button>
+          ))
+        ) : (
+          <div className="rounded-[0.95rem] border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-sm text-amber-50">
+            Det finns ingen tillgänglig rekommendation just nu.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="inline-flex items-center gap-2 text-sm text-stone-300">
+          <AlertTriangle className="h-4 w-4 text-clay-200" />
+          Resten av matchen räknas om direkt efter bekräftelse.
+        </p>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={!draft.selectedReplacementPlayerId}
+          className="inline-flex items-center justify-center rounded-full bg-clay-400 px-4 py-2 text-sm font-semibold text-clay-900 transition hover:bg-clay-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Bekräfta live-byte
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -2046,7 +2543,11 @@ function createInitialAppState(): InitialAppState {
   if (sharedValue) {
     try {
       const hydratedState = createHydratedStateFromSnapshot(sharedValue)
-      const matchTimeline = buildMatchTimeline(hydratedState.plan)
+      const hydratedDisplayPlan = applyLiveAdjustmentEvents({
+        plan: applyPeriodOverrides(hydratedState.plan, hydratedState.periodOverrides),
+        events: hydratedState.liveEvents,
+      }).plan
+      const matchTimeline = buildMatchTimeline(hydratedDisplayPlan)
       const activeMatchTimer =
         storedTimer &&
           storedTimer.lineupSnapshot === sharedValue &&
@@ -2079,7 +2580,11 @@ function createInitialAppState(): InitialAppState {
 
   try {
     const hydratedState = createHydratedStateFromSnapshot(storedTimer.lineupSnapshot)
-    const matchTimeline = buildMatchTimeline(hydratedState.plan)
+    const hydratedDisplayPlan = applyLiveAdjustmentEvents({
+      plan: applyPeriodOverrides(hydratedState.plan, hydratedState.periodOverrides),
+      events: hydratedState.liveEvents,
+    }).plan
+    const matchTimeline = buildMatchTimeline(hydratedDisplayPlan)
 
     if (!isStoredActiveMatchTimerCompatible(storedTimer, matchTimeline)) {
       clearStoredActiveMatchTimer()
@@ -2125,6 +2630,7 @@ function createDefaultAppState(): InitialAppState {
     generatedConfig,
     plan: initialPlan,
     periodOverrides: {},
+    liveEvents: [],
     shouldSyncShareUrl: false,
     selectedTimerPeriod: DEFAULT_SELECTED_TIMER_PERIOD,
     activeMatchTimer: null,
@@ -2132,7 +2638,7 @@ function createDefaultAppState(): InitialAppState {
 }
 
 function createHydratedStateFromSnapshot(encodedSnapshot: string) {
-  const { config, overrides } = decodeLineupSnapshot(encodedSnapshot)
+  const { config, overrides, liveEvents } = decodeLineupSnapshot(encodedSnapshot)
   const hydratedPlan = buildPlanFromGeneratedConfig(config, true)
   const hydratedOverrides = validateSharedOverrides(hydratedPlan, overrides)
 
@@ -2141,6 +2647,7 @@ function createHydratedStateFromSnapshot(encodedSnapshot: string) {
     generatedConfig: config,
     plan: hydratedPlan,
     periodOverrides: hydratedOverrides,
+    liveEvents,
   }
 }
 
@@ -2233,10 +2740,12 @@ function buildPlanFromGeneratedConfig(config: GeneratedConfig, exactSeed = false
 function createLineupShareUrl(
   config: GeneratedConfig,
   overrides: PeriodBoardOverrides,
+  liveEvents: LiveAdjustmentEvent[],
 ) {
   const encodedSnapshot = encodeLineupSnapshot({
     config,
     overrides: serializePeriodOverrides(overrides),
+    liveEvents,
   })
 
   return buildLineupShareUrl(encodedSnapshot, window.location.href)
@@ -2473,6 +2982,18 @@ function formatMinuteValue(value: number) {
   }
 
   return formatMinuteClockValue(value)
+}
+
+function formatMinuteQuantity(value: number) {
+  if (Number.isInteger(value)) {
+    return `${value}`
+  }
+
+  return value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function roundMinuteValue(value: number) {
+  return Math.round(value * 1000) / 1000
 }
 
 function formatMatchClock(valueMs: number) {
