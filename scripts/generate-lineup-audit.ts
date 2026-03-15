@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import {
+  DEFAULT_AUDIT_LIVE_PATTERNS,
   DEFAULT_AUDIT_FORMATIONS,
   DEFAULT_AUDIT_GOALKEEPER_MODES,
   DEFAULT_AUDIT_PERIOD_MINUTES,
@@ -125,6 +126,7 @@ async function main() {
         chunkMinutes: scenario.chunkMinutes,
         goalkeeperMode: scenario.goalkeeperMode,
         rosterOrder: scenario.rosterOrder,
+        liveAdjustmentPattern: scenario.liveAdjustmentPattern,
       },
       manifestPath: relativeManifestPath,
       seedFiles,
@@ -145,6 +147,7 @@ async function main() {
       substitutions: options.filters.substitutions ?? [...SUBSTITUTIONS_PER_PERIOD_OPTIONS],
       goalkeeperModes: options.filters.goalkeeperModes ?? [...DEFAULT_AUDIT_GOALKEEPER_MODES],
       rosterOrders: options.filters.rosterOrders ?? [...DEFAULT_AUDIT_ROSTER_ORDERS],
+      livePatterns: options.filters.liveAdjustmentPatterns ?? [...DEFAULT_AUDIT_LIVE_PATTERNS],
       seeds: options.seeds,
       clean: options.clean,
     },
@@ -169,6 +172,7 @@ function parseCliArgs(argv: string[]) {
       substitutions: { type: 'string' },
       goalkeeperModes: { type: 'string' },
       rosterOrders: { type: 'string' },
+      livePatterns: { type: 'string' },
       seeds: { type: 'string' },
       clean: { type: 'string' },
     },
@@ -187,6 +191,9 @@ function parseCliArgs(argv: string[]) {
         | Array<AuditScenario['goalkeeperMode']>
         | undefined,
       rosterOrders: parseStringList(values.rosterOrders) as RosterOrder[] | undefined,
+      liveAdjustmentPatterns: parseStringList(values.livePatterns) as
+        | Array<AuditScenario['liveAdjustmentPattern']>
+        | undefined,
     } satisfies AuditScenarioFilters,
     seeds: parseNumberList(values.seeds) ?? [...DEFAULT_AUDIT_SEEDS],
   }
@@ -214,6 +221,10 @@ function buildSummary(
       ),
       goalkeeperMode: buildDimensionBuckets(recordsWithContext, ({ scenario }) => scenario.goalkeeperMode),
       rosterOrder: buildDimensionBuckets(recordsWithContext, ({ scenario }) => scenario.rosterOrder),
+      liveAdjustmentPattern: buildDimensionBuckets(
+        recordsWithContext,
+        ({ scenario }) => scenario.liveAdjustmentPattern,
+      ),
     },
     topFlaggedScenarios: scenarioEntries
       .map((entry) => ({

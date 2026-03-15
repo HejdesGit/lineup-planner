@@ -1,3 +1,9 @@
+import {
+  createInitialAvailabilityState,
+  getLiveRecommendations,
+  replanMatchFromLiveEvent,
+  resolveChunkAtMinute,
+} from './liveAdjustments'
 import { getPlanScoreBreakdown, generateMatchPlan, resolveAttemptCount } from './scheduler'
 import { createNamedPlayers, getRosterNames, type RosterOrder } from './playerPool'
 import {
@@ -8,6 +14,7 @@ import {
 import {
   PERIOD_COUNT,
   type FormationKey,
+  type LiveAdjustmentEvent,
   type MatchPlan,
   type Player,
   type PlayerSummary,
@@ -23,11 +30,24 @@ export const DEFAULT_AUDIT_GOALKEEPER_MODES = [
   'lock-all-3',
 ] as const
 export const DEFAULT_AUDIT_ROSTER_ORDERS = ['canonical', 'reversed'] as const
+export const ALL_AUDIT_LIVE_PATTERNS = [
+  'none',
+  'single-temporary-out',
+  'quick-return',
+  'injury-mid-match',
+  'double-temporary-out',
+  'cross-period-return',
+] as const
+export const DEFAULT_AUDIT_LIVE_PATTERNS =
+  ['none'] as const satisfies readonly (typeof ALL_AUDIT_LIVE_PATTERNS)[number][]
 export const DEFAULT_AUDIT_SEEDS = [1, 7, 19, 42, 99] as const
 export const LINEUP_AUDIT_SCHEMA_VERSION = 1 as const
 const MINUTE_TOLERANCE = 0.001
+const LIVE_ADJUSTMENT_EPSILON = 0.0005
+const LIVE_ADJUSTMENT_TOLERANCE_OFFSET = 0.05
 
 export type GoalkeeperMode = (typeof DEFAULT_AUDIT_GOALKEEPER_MODES)[number]
+export type LiveAdjustmentPattern = (typeof ALL_AUDIT_LIVE_PATTERNS)[number]
 export type AuditFlag =
   | 'total-minutes-mismatch'
   | 'bench-minutes-mismatch'
@@ -39,6 +59,9 @@ export type AuditFlag =
   | 'duplicate-goalkeepers'
   | 'score-mismatch'
   | 'isolated-play-blocks'
+  | 'unavailable-player-leak'
+  | 'live-fairness-exceeded'
+  | 'live-pattern-incomplete'
 
 export interface AuditScenario {
   scenarioId: string
@@ -50,6 +73,7 @@ export interface AuditScenario {
   goalkeeperMode: GoalkeeperMode
   rosterOrder: RosterOrder
   rosterNames: string[]
+  liveAdjustmentPattern: LiveAdjustmentPattern
 }
 
 export interface AuditScenarioFilters {
@@ -59,6 +83,7 @@ export interface AuditScenarioFilters {
   substitutions?: readonly SubstitutionsPerPeriod[]
   goalkeeperModes?: readonly GoalkeeperMode[]
   rosterOrders?: readonly RosterOrder[]
+  liveAdjustmentPatterns?: readonly LiveAdjustmentPattern[]
 }
 
 export interface PlayerAuditMetrics {
@@ -108,6 +133,9 @@ export interface AuditValidations {
   summaryMinutesConsistent: boolean
   uniqueGoalkeepersPerPeriod: boolean
   noConsecutiveBenchWindows: boolean
+  noUnavailableLeaks: boolean
+  liveFairnessWithinTolerance: boolean
+  livePatternCompleted: boolean
   normalizedScoreMatchesPlan: boolean
   allPassed: boolean
 }
@@ -124,7 +152,28 @@ export interface AuditInputSnapshot {
   goalkeeperMode: GoalkeeperMode
   lockedGoalkeeperIds: Array<string | null>
   rosterOrder: RosterOrder
+  liveAdjustmentPattern: LiveAdjustmentPattern
   attempts: number
+}
+
+export interface LiveAdjustmentAuditEvent {
+  stepId: string
+  type: LiveAdjustmentEvent['type']
+  period: number
+  minute: number
+  playerId: string
+  replacementPlayerId: string | null
+}
+
+export interface LiveAdjustmentAudit {
+  pattern: Exclude<LiveAdjustmentPattern, 'none'>
+  events: LiveAdjustmentAuditEvent[]
+  fairness: {
+    maxAbsDeltaMinutes: number
+    toleranceMinutes: number
+  }
+  unavailablePlayerIds: string[]
+  completed: boolean
 }
 
 export interface GeneratedAuditRecord {
@@ -138,6 +187,7 @@ export interface GeneratedAuditRecord {
   derivedMetrics: AuditDerivedMetrics
   validations: AuditValidations
   flags: AuditFlag[]
+  liveAdjustment?: LiveAdjustmentAudit
 }
 
 export interface ScenarioAggregate {
@@ -176,6 +226,9 @@ export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditS
     filters.rosterOrders,
     'rosterordning',
   )
+  const liveAdjustmentPatterns = filters.liveAdjustmentPatterns
+    ? resolveFilter(ALL_AUDIT_LIVE_PATTERNS, filters.liveAdjustmentPatterns, 'livejusteringsmönster')
+    : [...DEFAULT_AUDIT_LIVE_PATTERNS]
 
   const scenarios: AuditScenario[] = []
 
@@ -186,24 +239,28 @@ export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditS
           const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
           for (const goalkeeperMode of goalkeeperModes) {
             for (const rosterOrder of rosterOrders) {
-              scenarios.push({
-                scenarioId: buildScenarioId({
+              for (const liveAdjustmentPattern of liveAdjustmentPatterns) {
+                scenarios.push({
+                  scenarioId: buildScenarioId({
+                    playerCount,
+                    periodMinutes,
+                    formation,
+                    substitutionsPerPeriod,
+                    goalkeeperMode,
+                    rosterOrder,
+                    liveAdjustmentPattern,
+                  }),
                   playerCount,
                   periodMinutes,
                   formation,
                   substitutionsPerPeriod,
+                  chunkMinutes,
                   goalkeeperMode,
                   rosterOrder,
-                }),
-                playerCount,
-                periodMinutes,
-                formation,
-                substitutionsPerPeriod,
-                chunkMinutes,
-                goalkeeperMode,
-                rosterOrder,
-                rosterNames: getRosterNames(playerCount, rosterOrder),
-              })
+                  rosterNames: getRosterNames(playerCount, rosterOrder),
+                  liveAdjustmentPattern,
+                })
+              }
             }
           }
         }
@@ -221,6 +278,7 @@ export function buildScenarioId({
   substitutionsPerPeriod,
   goalkeeperMode,
   rosterOrder,
+  liveAdjustmentPattern,
 }: {
   playerCount: number
   periodMinutes: 15 | 20
@@ -228,6 +286,7 @@ export function buildScenarioId({
   substitutionsPerPeriod: SubstitutionsPerPeriod
   goalkeeperMode: GoalkeeperMode
   rosterOrder: RosterOrder
+  liveAdjustmentPattern: LiveAdjustmentPattern
 }) {
   return [
     `players-${playerCount}`,
@@ -236,6 +295,7 @@ export function buildScenarioId({
     `subs-${substitutionsPerPeriod}`,
     `gk-${goalkeeperMode}`,
     `roster-${rosterOrder}`,
+    `live-${liveAdjustmentPattern}`,
   ].join('_')
 }
 
@@ -255,6 +315,7 @@ export function resolveLockedGoalkeeperIds(players: Player[], goalkeeperMode: Go
 export function generateAuditRecord(
   scenario: AuditScenario,
   seed: number,
+  overrides: AuditRecordOverrides = {},
 ): GeneratedAuditRecord {
   const players = createNamedPlayers(scenario.playerCount, scenario.rosterOrder)
   const lockedGoalkeeperIds = resolveLockedGoalkeeperIds(players, scenario.goalkeeperMode)
@@ -271,9 +332,16 @@ export function generateAuditRecord(
     lockedGoalkeeperIds,
     seed,
   })
-  const normalized = getPlanScoreBreakdown(plan, 'normalized')
-  const legacy = getPlanScoreBreakdown(plan, 'legacy')
-  const analysis = analyzeMatchPlan(plan, {
+  const liveResult =
+    overrides.liveAdjustmentResult !== undefined
+      ? overrides.liveAdjustmentResult
+      : scenario.liveAdjustmentPattern === 'none'
+        ? null
+        : applyLiveAdjustmentPattern(plan, scenario.liveAdjustmentPattern)
+  const auditedPlan = liveResult?.plan ?? plan
+  const normalized = getPlanScoreBreakdown(auditedPlan, 'normalized')
+  const legacy = getPlanScoreBreakdown(auditedPlan, 'legacy')
+  const analysis = analyzeMatchPlan(auditedPlan, {
     playerCount: scenario.playerCount,
     chunkMinutes: scenario.chunkMinutes,
     lockedGoalkeeperIds,
@@ -293,9 +361,10 @@ export function generateAuditRecord(
       goalkeeperMode: scenario.goalkeeperMode,
       lockedGoalkeeperIds,
       rosterOrder: scenario.rosterOrder,
+      liveAdjustmentPattern: scenario.liveAdjustmentPattern,
       attempts,
     },
-    plan,
+    plan: auditedPlan,
     scoreBreakdown: {
       normalized,
       legacy,
@@ -303,10 +372,17 @@ export function generateAuditRecord(
     derivedMetrics: analysis.derivedMetrics,
     validations: {
       ...analysis.validations,
-      normalizedScoreMatchesPlan: plan.score === normalized.totalScore,
+      noUnavailableLeaks: liveResult?.noUnavailableLeaks ?? true,
+      liveFairnessWithinTolerance: liveResult
+        ? liveResult.liveAdjustment.fairness.maxAbsDeltaMinutes <=
+        liveResult.liveAdjustment.fairness.toleranceMinutes + LIVE_ADJUSTMENT_EPSILON
+        : true,
+      livePatternCompleted: liveResult?.completed ?? true,
+      normalizedScoreMatchesPlan: auditedPlan.score === normalized.totalScore,
       allPassed: false,
     },
     flags: [],
+    liveAdjustment: liveResult?.liveAdjustment,
   }
 }
 
@@ -327,8 +403,12 @@ export function finalizeAuditRecord(record: GeneratedAuditRecord): GeneratedAudi
   }
 }
 
-export function createAuditRecord(scenario: AuditScenario, seed: number) {
-  return finalizeAuditRecord(generateAuditRecord(scenario, seed))
+export function createAuditRecord(
+  scenario: AuditScenario,
+  seed: number,
+  overrides: AuditRecordOverrides = {},
+) {
+  return finalizeAuditRecord(generateAuditRecord(scenario, seed, overrides))
 }
 
 export function summarizeScenarioRecords(records: GeneratedAuditRecord[]): ScenarioAggregate {
@@ -445,6 +525,9 @@ export function analyzeMatchPlan(
       summaryMinutesConsistent,
       uniqueGoalkeepersPerPeriod: new Set(plan.goalkeepers).size === plan.goalkeepers.length,
       noConsecutiveBenchWindows: playersWithExcessConsecutiveBenchWindows.length === 0,
+      noUnavailableLeaks: true,
+      liveFairnessWithinTolerance: true,
+      livePatternCompleted: true,
       normalizedScoreMatchesPlan: false,
       allPassed: false,
     } satisfies AuditValidations,
@@ -588,11 +671,325 @@ function buildFlags(record: GeneratedAuditRecord, validations: AuditValidations)
   if (!validations.normalizedScoreMatchesPlan) {
     flags.push('score-mismatch')
   }
+  if (!validations.noUnavailableLeaks) {
+    flags.push('unavailable-player-leak')
+  }
+  if (!validations.liveFairnessWithinTolerance) {
+    flags.push('live-fairness-exceeded')
+  }
+  if (!validations.livePatternCompleted) {
+    flags.push('live-pattern-incomplete')
+  }
   if (record.derivedMetrics.playersWithExcessIsolatedPlayBlocks.length > 0) {
     flags.push('isolated-play-blocks')
   }
 
   return flags
+}
+
+type LivePatternTarget =
+  | {
+    type: 'first-active-outfielder'
+  }
+  | {
+    type: 'previous-result'
+    stepId: string
+    field: 'playerId' | 'replacementPlayerId'
+  }
+
+interface LivePatternStep {
+  id: string
+  type: LiveAdjustmentEvent['type']
+  period: number
+  minute: number
+  target: LivePatternTarget
+}
+
+interface AppliedLiveAdjustmentPattern {
+  plan: MatchPlan
+  noUnavailableLeaks: boolean
+  completed: boolean
+  liveAdjustment: LiveAdjustmentAudit
+}
+
+// Narrow seam used by tests to verify audit handling of edge-case live results.
+export interface AuditRecordOverrides {
+  liveAdjustmentResult?: {
+    plan: MatchPlan
+    noUnavailableLeaks: boolean
+    completed: boolean
+    liveAdjustment: LiveAdjustmentAudit
+  } | null
+}
+
+function applyLiveAdjustmentPattern(
+  plan: MatchPlan,
+  pattern: Exclude<LiveAdjustmentPattern, 'none'>,
+): AppliedLiveAdjustmentPattern {
+  const steps = getLivePatternSteps(pattern)
+  const stepResults: Record<
+    string,
+    {
+      playerId: string
+      replacementPlayerId: string | null
+    }
+  > = {}
+  const events: LiveAdjustmentAuditEvent[] = []
+  let currentPlan = plan
+  let availability = createInitialAvailabilityState(plan)
+  let noUnavailableLeaks = true
+  let completed = true
+
+  for (const step of steps) {
+    const targetPlayerId = resolveLivePatternTargetPlayerId(currentPlan, step, stepResults)
+    const selectedRecommendation = getLiveRecommendations({
+      availability,
+      minute: step.minute,
+      period: step.period,
+      plan: currentPlan,
+      playerId: targetPlayerId,
+      type: step.type,
+    })[0]
+
+    if (!selectedRecommendation) {
+      events.push({
+        stepId: step.id,
+        type: step.type,
+        period: step.period,
+        minute: step.minute,
+        playerId: targetPlayerId,
+        replacementPlayerId: null,
+      })
+      stepResults[step.id] = {
+        playerId: targetPlayerId,
+        replacementPlayerId: null,
+      }
+      completed = false
+      break
+    }
+
+    const next =
+      step.type === 'return'
+        ? replanMatchFromLiveEvent({
+          availability,
+          event: {
+            type: 'return',
+            minute: step.minute,
+            period: step.period,
+            playerId: targetPlayerId,
+            replacementPlayerId: selectedRecommendation.playerId,
+          },
+          plan: currentPlan,
+        })
+        : replanMatchFromLiveEvent({
+          availability,
+          event: {
+            type: step.type,
+            minute: step.minute,
+            period: step.period,
+            playerId: targetPlayerId,
+            replacementPlayerId: selectedRecommendation.playerId,
+            status: step.type === 'injury' ? 'injured' : 'temporarily-out',
+          },
+          plan: currentPlan,
+        })
+
+    if (step.type !== 'return') {
+      noUnavailableLeaks =
+        noUnavailableLeaks &&
+        !isPlayerActiveFromMinute(next.plan, step.period, step.minute, targetPlayerId)
+    }
+
+    currentPlan = next.plan
+    availability = next.availability
+    events.push({
+      stepId: step.id,
+      type: step.type,
+      period: step.period,
+      minute: step.minute,
+      playerId: targetPlayerId,
+      replacementPlayerId: selectedRecommendation.playerId,
+    })
+    stepResults[step.id] = {
+      playerId: targetPlayerId,
+      replacementPlayerId: selectedRecommendation.playerId,
+    }
+  }
+
+  return {
+    plan: currentPlan,
+    noUnavailableLeaks,
+    completed,
+    liveAdjustment: {
+      pattern,
+      events,
+      fairness: buildLiveAdjustmentFairness(currentPlan),
+      unavailablePlayerIds: currentPlan.summaries
+        .filter((summary) => availability[summary.playerId] !== 'available')
+        .map((summary) => summary.playerId),
+      completed,
+    },
+  }
+}
+
+function getLivePatternSteps(
+  pattern: Exclude<LiveAdjustmentPattern, 'none'>,
+): LivePatternStep[] {
+  switch (pattern) {
+    case 'single-temporary-out':
+      return [
+        {
+          id: 'single-out',
+          type: 'temporary-out',
+          period: 2,
+          minute: 10,
+          target: { type: 'first-active-outfielder' },
+        },
+      ]
+    case 'quick-return':
+      return [
+        {
+          id: 'quick-out',
+          type: 'temporary-out',
+          period: 1,
+          minute: 6,
+          target: { type: 'first-active-outfielder' },
+        },
+        {
+          id: 'quick-return',
+          type: 'return',
+          period: 1,
+          minute: 9,
+          target: { type: 'previous-result', stepId: 'quick-out', field: 'playerId' },
+        },
+      ]
+    case 'injury-mid-match':
+      return [
+        {
+          id: 'injury-out',
+          type: 'injury',
+          period: 2,
+          minute: 9,
+          target: { type: 'first-active-outfielder' },
+        },
+      ]
+    case 'double-temporary-out':
+      return [
+        {
+          id: 'double-out-1',
+          type: 'temporary-out',
+          period: 2,
+          minute: 5,
+          target: { type: 'first-active-outfielder' },
+        },
+        {
+          id: 'double-out-2',
+          type: 'temporary-out',
+          period: 2,
+          minute: 7,
+          target: { type: 'first-active-outfielder' },
+        },
+      ]
+    case 'cross-period-return':
+      return [
+        {
+          id: 'cross-period-out',
+          type: 'temporary-out',
+          period: 1,
+          minute: 5,
+          target: { type: 'first-active-outfielder' },
+        },
+        {
+          id: 'cross-period-return',
+          type: 'return',
+          period: 3,
+          minute: 10,
+          target: { type: 'previous-result', stepId: 'cross-period-out', field: 'playerId' },
+        },
+      ]
+  }
+
+  const exhaustivePattern: never = pattern
+  throw new Error(`Okänt livejusteringsmönster: ${exhaustivePattern}`)
+}
+
+function resolveLivePatternTargetPlayerId(
+  plan: MatchPlan,
+  step: LivePatternStep,
+  stepResults: Record<string, { playerId: string; replacementPlayerId: string | null }>,
+) {
+  if (step.target.type === 'previous-result') {
+    const previous = stepResults[step.target.stepId]
+
+    if (!previous) {
+      throw new Error(`Saknar tidigare livejusteringssteg ${step.target.stepId}.`)
+    }
+
+    const targetPlayerId = previous[step.target.field]
+
+    if (!targetPlayerId) {
+      throw new Error(`Saknar spelarreferens för livejusteringssteget ${step.id}.`)
+    }
+
+    return targetPlayerId
+  }
+
+  const chunk = resolveLivePatternChunkAtMinute(plan, step.period, step.minute)?.chunk
+
+  if (!chunk) {
+    throw new Error(`Saknar aktivt byteblock för livejusteringssteget ${step.id}.`)
+  }
+
+  return getDefaultOutfieldPlayerId(chunk, plan)
+}
+
+function resolveLivePatternChunkAtMinute(plan: MatchPlan, period: number, minute: number) {
+  const currentPeriod = plan.periods[period - 1]
+
+  if (!currentPeriod) {
+    return null
+  }
+
+  return resolveChunkAtMinute(currentPeriod, minute)
+}
+
+function getDefaultOutfieldPlayerId(
+  chunk: MatchPlan['periods'][number]['chunks'][number],
+  plan: MatchPlan,
+) {
+  for (const position of plan.positions) {
+    const playerId = chunk.lineup[position]
+
+    if (playerId) {
+      return playerId
+    }
+  }
+
+  throw new Error('Hittade ingen aktiv utespelare i byteblocket.')
+}
+
+function isPlayerActiveFromMinute(plan: MatchPlan, period: number, minute: number, playerId: string) {
+  return plan.periods
+    .flatMap((currentPeriod) => currentPeriod.chunks)
+    .filter(
+      (chunk) =>
+        chunk.period > period ||
+        (chunk.period === period && chunk.startMinute >= minute - LIVE_ADJUSTMENT_EPSILON),
+    )
+    .some((chunk) => chunk.activePlayerIds.includes(playerId))
+}
+
+function buildLiveAdjustmentFairness(plan: MatchPlan) {
+  return {
+    maxAbsDeltaMinutes: roundAuditValue(
+      Math.max(
+        ...plan.summaries.map((summary) =>
+          Math.abs(summary.totalMinutes - plan.fairnessTargets[summary.playerId]),
+        ),
+      ),
+    ),
+    toleranceMinutes: roundAuditValue(plan.chunkMinutes + LIVE_ADJUSTMENT_TOLERANCE_OFFSET),
+  }
 }
 
 function average(values: number[]) {

@@ -17,7 +17,7 @@ describe('createAuditScenarios', () => {
 
     expect(scenarios).toHaveLength(480)
     expect(scenarios[0]?.scenarioId).toBe(
-      'players-8_period-15_formation-2-3-1_subs-2_gk-auto_roster-canonical',
+      'players-8_period-15_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
     )
     expect(
       buildScenarioId({
@@ -27,8 +27,27 @@ describe('createAuditScenarios', () => {
         substitutionsPerPeriod: 3,
         goalkeeperMode: 'auto',
         rosterOrder: 'canonical',
+        liveAdjustmentPattern: 'none',
       }),
-    ).toBe('players-10_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical')
+    ).toBe('players-10_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none')
+  })
+
+  it('adds live adjustment patterns as an extra matrix dimension when requested', () => {
+    const scenarios = createAuditScenarios({
+      playerCounts: [10],
+      periodMinutes: [20],
+      formations: ['2-3-1'],
+      substitutions: [2],
+      goalkeeperModes: ['auto'],
+      rosterOrders: ['canonical'],
+      liveAdjustmentPatterns: ['none', 'quick-return'],
+    })
+
+    expect(scenarios).toHaveLength(2)
+    expect(scenarios.map((scenario) => scenario.scenarioId)).toEqual([
+      'players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
+      'players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-quick-return',
+    ])
   })
 })
 
@@ -143,7 +162,7 @@ describe('createAuditRecord', () => {
   it('does not flag structurally expected isolated play blocks for the 11-player baseline case', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-11_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical',
+        scenarioId: 'players-11_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
         playerCount: 11,
         periodMinutes: 20,
         formation: '2-3-1',
@@ -152,6 +171,7 @@ describe('createAuditRecord', () => {
         goalkeeperMode: 'auto',
         rosterOrder: 'canonical',
         rosterNames: [],
+        liveAdjustmentPattern: 'none',
       },
       1,
     )
@@ -164,7 +184,7 @@ describe('createAuditRecord', () => {
   it('does not flag the 9-player high-rotation case after the short-window continuity rebalance', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-9_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical',
+        scenarioId: 'players-9_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
         playerCount: 9,
         periodMinutes: 15,
         formation: '2-3-1',
@@ -173,6 +193,7 @@ describe('createAuditRecord', () => {
         goalkeeperMode: 'auto',
         rosterOrder: 'canonical',
         rosterNames: [],
+        liveAdjustmentPattern: 'none',
       },
       1,
     )
@@ -185,7 +206,7 @@ describe('createAuditRecord', () => {
   it('does not flag the 10-player high-rotation case after the short-window continuity rebalance', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-10_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical',
+        scenarioId: 'players-10_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
         playerCount: 10,
         periodMinutes: 15,
         formation: '2-3-1',
@@ -194,6 +215,7 @@ describe('createAuditRecord', () => {
         goalkeeperMode: 'auto',
         rosterOrder: 'canonical',
         rosterNames: [],
+        liveAdjustmentPattern: 'none',
       },
       1,
     )
@@ -202,7 +224,143 @@ describe('createAuditRecord', () => {
     expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([])
     expect(record.flags).not.toContain('isolated-play-blocks')
   })
+
+  it.each([
+    ['single-temporary-out', 20260315, 1],
+    ['quick-return', 20260316, 2],
+    ['injury-mid-match', 20260321, 1],
+    ['double-temporary-out', 20260325, 2],
+    ['cross-period-return', 20260327, 2],
+  ] as const)(
+    'captures live adjustment data for %s',
+    (liveAdjustmentPattern, seed, expectedEventCount) => {
+      const record = createAuditRecord(createLiveScenario(liveAdjustmentPattern), seed)
+
+      expect(record.input.liveAdjustmentPattern).toBe(liveAdjustmentPattern)
+      expect(record.liveAdjustment).toBeDefined()
+      expect(record.liveAdjustment).toMatchObject({
+        pattern: liveAdjustmentPattern,
+        completed: true,
+      })
+      expect(record.liveAdjustment?.events).toHaveLength(expectedEventCount)
+      expect(record.validations.noUnavailableLeaks).toBe(true)
+      expect(record.validations.livePatternCompleted).toBe(true)
+      expect(record.validations.liveFairnessWithinTolerance).toBe(true)
+      expect(record.flags).not.toContain('unavailable-player-leak')
+      expect(record.flags).not.toContain('live-pattern-incomplete')
+      expect(record.flags).not.toContain('live-fairness-exceeded')
+    },
+  )
+
+  it('flags unavailable-player-leak when a cross-period return result reports a leak', () => {
+    const scenario = createLiveScenario('cross-period-return')
+    const baseline = createAuditRecord(scenario, 20260327)
+    const liveAdjustment = requireLiveAdjustment(baseline)
+
+    const leakedPlayerId = liveAdjustment.events[0]?.playerId
+
+    expect(leakedPlayerId).toBeTruthy()
+
+    const record = createAuditRecord(scenario, 20260327, {
+      liveAdjustmentResult: {
+        plan: baseline.plan,
+        noUnavailableLeaks: false,
+        completed: true,
+        liveAdjustment: {
+          ...liveAdjustment,
+          unavailablePlayerIds: leakedPlayerId ? [leakedPlayerId] : [],
+        },
+      },
+    })
+
+    expect(record.validations.noUnavailableLeaks).toBe(false)
+    expect(record.validations.livePatternCompleted).toBe(true)
+    expect(record.flags).toContain('unavailable-player-leak')
+  })
+
+  it('flags live-fairness-exceeded when double-temporary-out drifts past tolerance', () => {
+    const scenario = createLiveScenario('double-temporary-out')
+    const baseline = createAuditRecord(scenario, 20260325)
+    const liveAdjustment = requireLiveAdjustment(baseline)
+
+    const record = createAuditRecord(scenario, 20260325, {
+      liveAdjustmentResult: {
+        plan: baseline.plan,
+        noUnavailableLeaks: true,
+        completed: true,
+        liveAdjustment: {
+          ...liveAdjustment,
+          fairness: {
+            ...liveAdjustment.fairness,
+            maxAbsDeltaMinutes: liveAdjustment.fairness.toleranceMinutes + 1,
+          },
+        },
+      },
+    })
+
+    expect(record.validations.noUnavailableLeaks).toBe(true)
+    expect(record.validations.liveFairnessWithinTolerance).toBe(false)
+    expect(record.validations.livePatternCompleted).toBe(true)
+    expect(record.flags).toContain('live-fairness-exceeded')
+  })
+
+  it('flags live patterns that cannot be fully applied for thin benches', () => {
+    const record = createAuditRecord(
+      {
+        ...createLiveScenario('double-temporary-out'),
+        scenarioId:
+          'players-8_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-double-temporary-out',
+        playerCount: 8,
+        rosterNames: [],
+      },
+      20260325,
+    )
+
+    expect(record.liveAdjustment?.events).toMatchObject([
+      { stepId: 'double-out-1', replacementPlayerId: expect.any(String) },
+      { stepId: 'double-out-2', replacementPlayerId: null },
+    ])
+    expect(record.liveAdjustment?.completed).toBe(false)
+    expect(record.validations.livePatternCompleted).toBe(false)
+    expect(record.flags).toContain('live-pattern-incomplete')
+  })
 })
+
+function createLiveScenario(
+  liveAdjustmentPattern:
+    | 'single-temporary-out'
+    | 'quick-return'
+    | 'injury-mid-match'
+    | 'double-temporary-out'
+    | 'cross-period-return',
+) {
+  return {
+    scenarioId: buildScenarioId({
+      playerCount: 10,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      substitutionsPerPeriod: 2,
+      goalkeeperMode: 'auto',
+      rosterOrder: 'canonical',
+      liveAdjustmentPattern,
+    }),
+    playerCount: 10,
+    periodMinutes: 20 as const,
+    formation: '2-3-1' as const,
+    substitutionsPerPeriod: 2 as const,
+    chunkMinutes: 10,
+    goalkeeperMode: 'auto' as const,
+    rosterOrder: 'canonical' as const,
+    rosterNames: [],
+    liveAdjustmentPattern,
+  }
+}
+
+function requireLiveAdjustment(record: ReturnType<typeof createAuditRecord>) {
+  expect(record.liveAdjustment).toBeDefined()
+
+  return record.liveAdjustment!
+}
 
 function createManualPlan(): MatchPlan {
   const summaries = createManualSummaries()
