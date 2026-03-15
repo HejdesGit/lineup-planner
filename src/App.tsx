@@ -1475,32 +1475,31 @@ function ChunkPositionBadge({
 }: {
   label: string
   player: string
-  tone: 'def' | 'mid' | 'att' | 'gk'
+  tone: 'def' | 'mid' | 'att'
   emphasis: 'idle' | 'incoming' | 'outgoing' | 'swing'
   isSingle?: boolean
 }) {
   const toneClasses = {
-    def: 'border-sky-300/22 bg-[linear-gradient(180deg,rgba(56,189,248,0.12),rgba(12,74,110,0.22))] text-sky-50',
-    mid: 'border-emerald-300/22 bg-[linear-gradient(180deg,rgba(74,222,128,0.12),rgba(6,78,59,0.22))] text-emerald-50',
-    att: 'border-amber-300/24 bg-[linear-gradient(180deg,rgba(245,158,11,0.14),rgba(120,53,15,0.24))] text-amber-50',
-    gk: 'border-white/15 bg-[linear-gradient(180deg,rgba(250,250,249,0.08),rgba(41,37,36,0.22))] text-stone-50',
+    def: 'border-sky-300/35 bg-[linear-gradient(180deg,rgba(56,189,248,0.16),rgba(12,74,110,0.24))] shadow-[inset_0_1px_0_rgba(186,230,253,0.08),0_0_0_1px_rgba(12,74,110,0.16)]',
+    mid: 'border-emerald-300/35 bg-[linear-gradient(180deg,rgba(74,222,128,0.16),rgba(6,78,59,0.24))] shadow-[inset_0_1px_0_rgba(209,250,229,0.08),0_0_0_1px_rgba(6,78,59,0.16)]',
+    att: 'border-clay-300/35 bg-[linear-gradient(180deg,rgba(212,125,51,0.18),rgba(69,37,21,0.28))] shadow-[inset_0_1px_0_rgba(251,191,36,0.08),0_0_0_1px_rgba(120,53,15,0.16)]',
   }
-  const emphasisClasses = {
-    idle: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]',
-    incoming: 'ring-1 ring-emerald-300/45 shadow-[0_0_0_1px_rgba(16,185,129,0.12),0_0_18px_rgba(16,185,129,0.08)]',
-    outgoing: 'ring-1 ring-amber-300/45 shadow-[0_0_0_1px_rgba(245,158,11,0.12),0_0_18px_rgba(245,158,11,0.08)]',
-    swing: 'ring-1 ring-clay-300/45 shadow-[0_0_0_1px_rgba(212,125,51,0.14),0_0_18px_rgba(212,125,51,0.08)]',
+  const nameClasses = {
+    idle: 'text-white',
+    incoming: 'text-emerald-300',
+    outgoing: 'text-amber-200',
+    swing: 'text-clay-100',
   }
 
   return (
     <div
-      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-2 text-center ${toneClasses[tone]} ${emphasisClasses[emphasis]} ${
+      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-2 text-center ${toneClasses[tone]} ${
         isSingle ? 'max-w-[11rem]' : ''
       }`}
     >
       <div className="pointer-events-none">
-        <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
-        <p className="mt-1 truncate text-sm font-semibold text-white">{player}</p>
+        <p className="font-mono text-[9px] uppercase tracking-[0.26em] text-white/75">{label}</p>
+        <p className={`mt-1 truncate text-sm font-semibold ${nameClasses[emphasis]}`}>{player}</p>
       </div>
     </div>
   )
