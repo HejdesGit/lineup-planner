@@ -643,11 +643,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
-    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
-
-    if (!activePeriodCard) {
-      throw new Error('Aktivt periodkort saknas i testet.')
-    }
+    const activePeriodCard = getLivePanel()
 
     expect(within(activePeriodCard).queryByText(/första reserv/i)).not.toBeInTheDocument()
     expect(within(activePeriodCard).getByText(/tillgänglig bänk/i)).toBeInTheDocument()
@@ -655,23 +651,276 @@ describe('App', () => {
     expect(within(activePeriodCard).getByText(/nästa bänk:/i)).toBeInTheDocument()
   })
 
+  it('opens temporary-out from the top-left icon and positionsbyte from the top-right icon', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = getLivePanel()
+
+    const temporaryOutButton = within(activePeriodCard).getAllByRole('button', {
+      name: /markera .* som tillfälligt ute på /i,
+    })[0]
+    const temporaryOutInfo = parseLiveBadgeLabel(
+      temporaryOutButton.getAttribute('aria-label') ?? '',
+      'Markera',
+      'som tillfälligt ute',
+    )
+
+    await user.click(temporaryOutButton)
+
+    expect(
+      within(activePeriodCard).getByText(new RegExp(`${temporaryOutInfo.playerName} är tillfälligt ute`, 'i')),
+    ).toBeInTheDocument()
+
+    await user.click(within(activePeriodCard).getByRole('button', { name: /stäng/i }))
+
+    const positionSwapButton = within(activePeriodCard).getAllByRole('button', {
+      name: /starta positionsbyte för .* på /i,
+    })[0]
+    const positionSwapInfo = parseLiveBadgeLabel(
+      positionSwapButton.getAttribute('aria-label') ?? '',
+      'Starta positionsbyte för',
+    )
+
+    await user.click(positionSwapButton)
+
+    expect(
+      within(activePeriodCard).getByText(new RegExp(`${positionSwapInfo.playerName} positionsbyte`, 'i')),
+    ).toBeInTheDocument()
+  })
+
+  it('opens both live actions when the player box itself is clicked', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = getLivePanel()
+
+    const bodyButton = within(activePeriodCard).getAllByRole('button', {
+      name: /öppna liveval för .* på /i,
+    })[0]
+    const bodyInfo = parseLiveBadgeLabel(bodyButton.getAttribute('aria-label') ?? '', 'Öppna liveval för')
+
+    await user.click(bodyButton)
+
+    expect(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`${bodyInfo.playerName} är tillfälligt ute`, 'i'),
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`${bodyInfo.playerName} positionsbyte`, 'i'),
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows both on-field players and bench players as positionsbyte candidates and swaps immediately', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = getLivePanel()
+
+    const liveButtons = within(activePeriodCard).getAllByRole('button', {
+      name: /öppna liveval för .* på /i,
+    })
+    const sourceInfo = parseLiveBadgeLabel(
+      liveButtons.find((button) => !/ på MV$/i.test(button.getAttribute('aria-label') ?? ''))?.getAttribute(
+        'aria-label',
+      ) ?? '',
+      'Öppna liveval för',
+    )
+    const targetInfo = parseLiveBadgeLabel(
+      liveButtons
+        .filter((button) => !/ på MV$/i.test(button.getAttribute('aria-label') ?? ''))
+        .map((button) => button.getAttribute('aria-label') ?? '')
+        .find((label) => !label.includes(sourceInfo.playerName)) ?? '',
+      'Öppna liveval för',
+    )
+
+    await user.click(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`starta positionsbyte för ${sourceInfo.playerName} på ${sourceInfo.position}`, 'i'),
+      }),
+    )
+
+    expect(
+      within(activePeriodCard).getAllByText(/är på planen nu och kan byta position direkt/i).length,
+    ).toBeGreaterThan(0)
+    expect(
+      within(activePeriodCard).getAllByText(/är tillgänglig på bänken och kan komma in direkt/i).length,
+    ).toBeGreaterThan(0)
+
+    await user.click(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`^${targetInfo.playerName}\\b`, 'i'),
+      }),
+    )
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    await waitFor(() => {
+      expect(
+        within(activePeriodCard).getByRole('button', {
+          name: new RegExp(`öppna liveval för ${sourceInfo.playerName} på ${targetInfo.position}`, 'i'),
+        }),
+      ).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(
+        within(activePeriodCard).getByRole('button', {
+          name: new RegExp(`öppna liveval för ${targetInfo.playerName} på ${sourceInfo.position}`, 'i'),
+        }),
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('allows positionsbyte directly with a bench player', async () => {
+    const user = await generateCustomPlan()
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = getLivePanel()
+    const sourceInfo = parseLiveBadgeLabel(
+      within(activePeriodCard)
+        .getAllByRole('button', {
+          name: /öppna liveval för .* på /i,
+        })
+        .find((button) => !/ på MV$/i.test(button.getAttribute('aria-label') ?? ''))?.getAttribute(
+          'aria-label',
+        ) ?? '',
+      'Öppna liveval för',
+    )
+
+    await user.click(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`starta positionsbyte för ${sourceInfo.playerName} på ${sourceInfo.position}`, 'i'),
+      }),
+    )
+
+    const benchCandidateButton = within(activePeriodCard)
+      .getAllByRole('button')
+      .find((button) =>
+        /är tillgänglig på bänken och kan komma in direkt/i.test(button.textContent ?? ''),
+      )
+
+    if (!benchCandidateButton) {
+      throw new Error('Kunde inte hitta någon bänkkandidat i positionsbytet.')
+    }
+
+    const firstBenchPlayerName =
+      (benchCandidateButton.textContent ?? '').match(/^(.*?)Är tillgänglig på bänken/i)?.[1]?.trim() ?? null
+
+    if (!firstBenchPlayerName) {
+      throw new Error('Kunde inte tolka bänkkandidatens namn i testet.')
+    }
+
+    await user.click(benchCandidateButton)
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    await waitFor(() => {
+      expect(
+        within(activePeriodCard).getByRole('button', {
+          name: new RegExp(`öppna liveval för ${firstBenchPlayerName} på ${sourceInfo.position}`, 'i'),
+        }),
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('allows positionsbyte with the goalkeeper and persists it through timer restore', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = getLivePanel()
+
+    const goalkeeperInfo = parseLiveBadgeLabel(
+      within(activePeriodCard)
+        .getByRole('button', {
+          name: /öppna liveval för .* på MV/i,
+        })
+        .getAttribute('aria-label') ?? '',
+      'Öppna liveval för',
+    )
+    const outfieldInfo = parseLiveBadgeLabel(
+      within(activePeriodCard)
+        .getAllByRole('button', {
+          name: /öppna liveval för .* på /i,
+        })
+        .map((button) => button.getAttribute('aria-label') ?? '')
+        .find((label) => !/ på MV$/i.test(label)) ?? '',
+      'Öppna liveval för',
+    )
+
+    await user.click(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`starta positionsbyte för ${goalkeeperInfo.playerName} på MV`, 'i'),
+      }),
+    )
+    await user.click(
+      within(activePeriodCard).getByRole('button', {
+        name: new RegExp(`^${outfieldInfo.playerName}\\b`, 'i'),
+      }),
+    )
+    await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
+
+    await waitFor(() => {
+      expect(
+        within(activePeriodCard).getByRole('button', {
+          name: new RegExp(`öppna liveval för ${goalkeeperInfo.playerName} på ${outfieldInfo.position}`, 'i'),
+        }),
+      ).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(
+        within(activePeriodCard).getByRole('button', {
+          name: new RegExp(`öppna liveval för ${outfieldInfo.playerName} på MV`, 'i'),
+        }),
+      ).toBeInTheDocument()
+    })
+
+    await waitFor(() => {
+      expect(getStoredMatchTimer()).not.toBeNull()
+    })
+
+    expect(decodeLineupSnapshot(getStoredMatchTimer()!.lineupSnapshot).liveEvents).toEqual([
+      expect.objectContaining({
+        type: 'position-swap',
+        playerId: expect.any(String),
+        targetPlayerId: expect.any(String),
+      }),
+    ])
+
+    cleanup()
+    setUrl('/')
+    render(<App />)
+
+    const restoredPeriodCard = getLivePanel()
+
+    expect(
+      within(restoredPeriodCard).getByRole('button', {
+        name: new RegExp(`öppna liveval för ${outfieldInfo.playerName} på MV`, 'i'),
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('marks a live player as temporarily out, recommends a replacement, and can return the player immediately', async () => {
     const user = await generateCustomPlan()
 
     fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
-    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
-
-    if (!activePeriodCard) {
-      throw new Error('Aktivt periodkort saknas i testet.')
-    }
+    const activePeriodCard = getLivePanel()
 
     const injuryButton = within(activePeriodCard).getAllByRole('button', {
       name: /markera .* som tillfälligt ute/i,
     })[0]
-    const playerName = (injuryButton.getAttribute('aria-label') ?? '')
-      .replace(/^Markera /i, '')
-      .replace(/ som tillfälligt ute$/i, '')
+    const playerName = parseLiveBadgeLabel(
+      injuryButton.getAttribute('aria-label') ?? '',
+      'Markera',
+      'som tillfälligt ute',
+    ).playerName
 
     await user.click(injuryButton)
 
@@ -703,11 +952,7 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
-    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
-
-    if (!activePeriodCard) {
-      throw new Error('Aktivt periodkort saknas i testet.')
-    }
+    const activePeriodCard = getLivePanel()
 
     const goalkeeperButton = within(activePeriodCard).getByRole('button', {
       name: /markera ada som tillfälligt ute/i,
@@ -744,18 +989,16 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
 
-    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
-
-    if (!activePeriodCard) {
-      throw new Error('Aktivt periodkort saknas i testet.')
-    }
+    const activePeriodCard = getLivePanel()
 
     const injuryButton = within(activePeriodCard).getAllByRole('button', {
       name: /markera .* som tillfälligt ute/i,
     })[0]
-    const playerName = (injuryButton.getAttribute('aria-label') ?? '')
-      .replace(/^Markera /i, '')
-      .replace(/ som tillfälligt ute$/i, '')
+    const playerName = parseLiveBadgeLabel(
+      injuryButton.getAttribute('aria-label') ?? '',
+      'Markera',
+      'som tillfälligt ute',
+    ).playerName
 
     await user.click(injuryButton)
     await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
@@ -772,11 +1015,7 @@ describe('App', () => {
     setUrl('/')
     render(<App />)
 
-    const restoredPeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
-
-    if (!restoredPeriodCard) {
-      throw new Error('Återställt periodkort saknas i testet.')
-    }
+    const restoredPeriodCard = getLivePanel()
 
     expect(
       within(restoredPeriodCard).getByRole('button', {
@@ -789,6 +1028,30 @@ describe('App', () => {
 
 function getStoredMatchTimer() {
   return parseStoredActiveMatchTimer(window.localStorage.getItem(ACTIVE_MATCH_TIMER_STORAGE_KEY))
+}
+
+function getLivePanel() {
+  const livePanel = screen.getByText(/^live just nu$/i).closest('section')
+
+  if (!livePanel) {
+    throw new Error('Livepanelen saknas i testet.')
+  }
+
+  return livePanel as HTMLElement
+}
+
+function parseLiveBadgeLabel(label: string, prefix: string, suffix = '') {
+  const pattern = new RegExp(`^${prefix} (.+?)${suffix ? ` ${suffix}` : ''} på (.+)$`, 'i')
+  const match = label.match(pattern)
+
+  if (!match) {
+    throw new Error(`Kunde inte tolka live-etiketten: ${label}`)
+  }
+
+  return {
+    playerName: match[1],
+    position: match[2],
+  }
 }
 
 function getPlayerName(playerId: string) {

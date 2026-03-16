@@ -308,14 +308,17 @@ describe('createAuditRecord', () => {
   )
 
   it.each([
-    ['single-temporary-out', 20260315, 1],
-    ['quick-return', 20260316, 2],
-    ['injury-mid-match', 20260321, 1],
-    ['double-temporary-out', 20260325, 2],
-    ['cross-period-return', 20260327, 2],
+    ['single-temporary-out', 20260315, 1, true],
+    ['quick-return', 20260316, 2, true],
+    ['injury-mid-match', 20260321, 1, true],
+    ['double-temporary-out', 20260325, 2, true],
+    ['cross-period-return', 20260327, 2, true],
+    ['position-swap-outfield', 20260401, 1, true],
+    ['position-swap-goalkeeper', 20260402, 1, true],
+    ['position-swap-bench', 20260403, 1, false],
   ] as const)(
     'captures live adjustment data for %s',
-    (liveAdjustmentPattern, seed, expectedEventCount) => {
+    (liveAdjustmentPattern, seed, expectedEventCount, expectedFairnessWithinTolerance) => {
       const record = createAuditRecord(createLiveScenario(liveAdjustmentPattern), seed)
 
       expect(record.input.liveAdjustmentPattern).toBe(liveAdjustmentPattern)
@@ -327,10 +330,20 @@ describe('createAuditRecord', () => {
       expect(record.liveAdjustment?.events).toHaveLength(expectedEventCount)
       expect(record.validations.noUnavailableLeaks).toBe(true)
       expect(record.validations.livePatternCompleted).toBe(true)
-      expect(record.validations.liveFairnessWithinTolerance).toBe(true)
+      expect(record.validations.liveFairnessWithinTolerance).toBe(expectedFairnessWithinTolerance)
       expect(record.flags).not.toContain('unavailable-player-leak')
       expect(record.flags).not.toContain('live-pattern-incomplete')
-      expect(record.flags).not.toContain('live-fairness-exceeded')
+      expect(record.flags.includes('live-fairness-exceeded')).toBe(!expectedFairnessWithinTolerance)
+
+      if (liveAdjustmentPattern.startsWith('position-swap')) {
+        expect(record.liveAdjustment?.events).toMatchObject([
+          {
+            type: 'position-swap',
+            playerId: expect.any(String),
+            targetPlayerId: expect.any(String),
+          },
+        ])
+      }
     },
   )
 
@@ -414,7 +427,10 @@ function createLiveScenario(
     | 'quick-return'
     | 'injury-mid-match'
     | 'double-temporary-out'
-    | 'cross-period-return',
+    | 'cross-period-return'
+    | 'position-swap-outfield'
+    | 'position-swap-goalkeeper'
+    | 'position-swap-bench',
 ) {
   return {
     scenarioId: buildScenarioId({

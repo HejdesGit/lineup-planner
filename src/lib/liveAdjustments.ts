@@ -9,6 +9,7 @@ import {
   type Lineup,
   type LiveAdjustmentEvent,
   type LiveAdjustmentRole,
+  type LiveAvailabilityAdjustmentEvent,
   type LiveAvailabilityState,
   type LiveRecommendation,
   type MatchPlan,
@@ -175,6 +176,10 @@ export function getLiveRecommendations({
     context.playerIds.map((candidateId, index) => [candidateId, index]),
   ) as Record<string, number>
   const phase: RotationPhase = context.hasStartedCurrentPeriod ? 'in-period' : 'period-start'
+
+  if (type === 'position-swap') {
+    return []
+  }
 
   if (type === 'injury' || type === 'temporary-out') {
     const playerRole = resolveLiveAdjustmentRole({
@@ -414,6 +419,101 @@ export function replanMatchFromLiveEvent({
     period: event.period,
     minute: event.minute,
   })
+  const periodIndex = event.period - 1
+  const currentRemainderDuration = roundMinuteValue(context.currentChunk.endMinute - context.eventMinute)
+  const nameById = context.nameById
+  const allPlayerIds = context.playerIds
+
+  if (event.type === 'position-swap') {
+    validatePositionSwapEvent({
+      event,
+      currentChunk: context.currentChunk,
+      availability,
+      playerIds: allPlayerIds,
+    })
+
+    const periods: PeriodPlan[] = [...context.prefixPeriods]
+    const currentPeriodChunks = [...context.currentPeriodPrefixChunks]
+
+    if (currentRemainderDuration > ROUNDING_EPSILON) {
+      currentPeriodChunks.push(
+        swapChunkPlayers({
+          chunk: context.currentChunk,
+          event,
+          nameById,
+          allPlayerIds,
+          availability,
+          startMinute: context.eventMinute,
+          endMinute: context.currentChunk.endMinute,
+          substitutions: [],
+        }),
+      )
+    }
+
+    const currentPeriodSuffixChunks = plan.periods[periodIndex].chunks
+      .slice(context.currentChunkIndex + 1)
+      .map((chunk) =>
+        swapChunkPlayers({
+          chunk,
+          event,
+          nameById,
+          allPlayerIds,
+          availability,
+        }),
+      )
+
+    periods.push(
+      buildPeriodPlan({
+        periodNumber: event.period,
+        formation: plan.formation,
+        positions: plan.positions,
+        goalkeeperId: mapSwappedPlayerId(plan.periods[periodIndex].goalkeeperId, event),
+        chunks: [...currentPeriodChunks, ...currentPeriodSuffixChunks],
+        nameById,
+      }),
+    )
+
+    for (let nextPeriodIndex = periodIndex + 1; nextPeriodIndex < PERIOD_COUNT; nextPeriodIndex += 1) {
+      periods.push(
+        buildPeriodPlan({
+          periodNumber: nextPeriodIndex + 1,
+          formation: plan.formation,
+          positions: plan.positions,
+          goalkeeperId: mapSwappedPlayerId(plan.periods[nextPeriodIndex].goalkeeperId, event),
+          chunks: plan.periods[nextPeriodIndex].chunks.map((chunk) =>
+            swapChunkPlayers({
+              chunk,
+              event,
+              nameById,
+              allPlayerIds,
+              availability,
+            }),
+          ),
+          nameById,
+        }),
+      )
+    }
+
+    const normalizedPeriods = normalizePeriods(periods, nameById)
+    const summaries = buildSummariesFromPeriods(plan.summaries, normalizedPeriods, nameById)
+
+    return {
+      availability,
+      plan: {
+        ...plan,
+        goalkeepers: normalizedPeriods.map((period) => period.goalkeeperId),
+        periods: normalizedPeriods,
+        summaries,
+        score: getPlanScoreBreakdown({
+          periods: normalizedPeriods,
+          summaries,
+          targets: plan.targets,
+          fairnessTargets: plan.fairnessTargets,
+        }).totalScore,
+      },
+    }
+  }
+
   const eventRole = resolveLiveAdjustmentRole({
     currentChunk: context.currentChunk,
     event,
@@ -443,10 +543,6 @@ export function replanMatchFromLiveEvent({
     throw new Error('Spelaren är redan tillgänglig.')
   }
 
-  const periodIndex = event.period - 1
-  const currentRemainderDuration = roundMinuteValue(context.currentChunk.endMinute - context.eventMinute)
-  const nameById = context.nameById
-  const allPlayerIds = context.playerIds
   const playerOrderById = Object.fromEntries(
     allPlayerIds.map((playerId, index) => [playerId, index]),
   ) as Record<string, number>
@@ -783,7 +879,7 @@ function validateEventReplacement({
   currentChunk,
   playerIds,
 }: {
-  event: LiveAdjustmentEvent
+  event: LiveAvailabilityAdjustmentEvent
   eventRole: LiveAdjustmentRole
   availability: LiveAvailabilityState
   currentChunk: ChunkPlan
@@ -821,6 +917,39 @@ function validateEventReplacement({
 
   if (!availableBenchPlayerIds.includes(event.replacementPlayerId)) {
     throw new Error('Den valda ersättaren måste komma från bänken.')
+  }
+}
+
+function validatePositionSwapEvent({
+  event,
+  currentChunk,
+  availability,
+  playerIds,
+}: {
+  event: Extract<LiveAdjustmentEvent, { type: 'position-swap' }>
+  currentChunk: ChunkPlan
+  availability: LiveAvailabilityState
+  playerIds: string[]
+}) {
+  if (!playerIds.includes(event.playerId) || !playerIds.includes(event.targetPlayerId)) {
+    throw new Error('Okänd spelare i live-byte.')
+  }
+
+  if (event.playerId === event.targetPlayerId) {
+    throw new Error('Välj en annan spelare för positionsbytet.')
+  }
+
+  const activePlayerIds = new Set(currentChunk.activePlayerIds)
+
+  if (!activePlayerIds.has(event.playerId)) {
+    throw new Error('Spelaren som ska flyttas måste vara på planen.')
+  }
+
+  if (
+    !activePlayerIds.has(event.targetPlayerId) &&
+    availability[event.targetPlayerId] !== 'available'
+  ) {
+    throw new Error('Bänkspelaren är inte tillgänglig just nu.')
   }
 }
 
@@ -1408,6 +1537,67 @@ function cloneChunk(
   }
 }
 
+function mapSwappedPlayerId(
+  playerId: string,
+  event: Extract<LiveAdjustmentEvent, { type: 'position-swap' }>,
+) {
+  if (playerId === event.playerId) {
+    return event.targetPlayerId
+  }
+
+  if (playerId === event.targetPlayerId) {
+    return event.playerId
+  }
+
+  return playerId
+}
+
+function swapChunkPlayers({
+  chunk,
+  event,
+  nameById,
+  allPlayerIds,
+  availability,
+  startMinute = chunk.startMinute,
+  endMinute = chunk.endMinute,
+  substitutions = chunk.substitutions,
+}: {
+  chunk: ChunkPlan
+  event: Extract<LiveAdjustmentEvent, { type: 'position-swap' }>
+  nameById: Record<string, string>
+  allPlayerIds: string[]
+  availability: LiveAvailabilityState
+  startMinute?: number
+  endMinute?: number
+  substitutions?: ChunkSubstitution[]
+}) {
+  return createChunk({
+    template: {
+      chunkIndex: chunk.chunkIndex,
+      periodIndex: chunk.period - 1,
+      windowIndex: chunk.windowIndex,
+      startMinute,
+      endMinute,
+      durationMinutes: roundMinuteValue(endMinute - startMinute),
+    },
+    lineup: Object.fromEntries(
+      Object.entries(chunk.lineup).map(([position, playerId]) => [
+        position,
+        playerId ? mapSwappedPlayerId(playerId, event) : playerId,
+      ]),
+    ) as Lineup,
+    goalkeeperId: mapSwappedPlayerId(chunk.goalkeeperId, event),
+    allPlayerIds,
+    nameById,
+    availability,
+    substitutions: substitutions.map((substitution) => ({
+      ...substitution,
+      playerInId: mapSwappedPlayerId(substitution.playerInId, event),
+      playerOutId: mapSwappedPlayerId(substitution.playerOutId, event),
+    })),
+  })
+}
+
 function applyChunkToHistories({
   chunk,
   positions,
@@ -1613,7 +1803,7 @@ function resolveLiveAdjustmentRole({
   event,
 }: {
   currentChunk: ChunkPlan
-  event: Pick<LiveAdjustmentEvent, 'type' | 'playerId' | 'replacementPlayerId' | 'role'>
+  event: Pick<LiveAvailabilityAdjustmentEvent, 'type' | 'playerId' | 'replacementPlayerId' | 'role'>
 }) {
   if (event.role) {
     return event.role

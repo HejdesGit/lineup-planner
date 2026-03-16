@@ -23,6 +23,11 @@ interface LineupSnapshotV2 extends Omit<LineupSnapshotV1, 'v'> {
   le?: LiveAdjustmentEvent[]
 }
 
+interface LineupSnapshotV3 extends Omit<LineupSnapshotV1, 'v'> {
+  v: 3
+  le?: LiveAdjustmentEvent[]
+}
+
 export interface DecodedLineupSnapshot {
   config: GeneratedConfig
   overrides: Record<string, Record<string, string>>
@@ -38,8 +43,8 @@ export function encodeLineupSnapshot({
   overrides: Record<string, Record<string, string>>
   liveEvents?: LiveAdjustmentEvent[]
 }) {
-  const payload: LineupSnapshotV2 = {
-    v: 2,
+  const payload: LineupSnapshotV3 = {
+    v: 3,
     p: config.playerNames,
     pm: config.periodMinutes,
     f: config.formation,
@@ -57,9 +62,10 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
   const parsed = JSON.parse(decodeBase64Url(encodedSnapshot)) as
     | Partial<LineupSnapshotV1>
     | Partial<LineupSnapshotV2>
+    | Partial<LineupSnapshotV3>
 
   if (
-    (parsed.v !== 1 && parsed.v !== 2) ||
+    (parsed.v !== 1 && parsed.v !== 2 && parsed.v !== 3) ||
     !Array.isArray(parsed.p) ||
     parsed.p.length < 8 ||
     parsed.p.length > 12 ||
@@ -80,7 +86,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
     throw new Error('Ogiltig delningslänk.')
   }
 
-  if (parsed.v === 2 && parsed.le && !isLiveEventList(parsed.le)) {
+  if ((parsed.v === 2 || parsed.v === 3) && parsed.le && !isLiveEventList(parsed.le)) {
     throw new Error('Ogiltig delningslänk.')
   }
 
@@ -102,7 +108,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
       seed,
     },
     overrides: parsed.o ?? {},
-    liveEvents: parsed.v === 2 ? parsed.le ?? [] : [],
+    liveEvents: parsed.v === 2 || parsed.v === 3 ? parsed.le ?? [] : [],
   }
 }
 
@@ -153,17 +159,26 @@ function isLiveEventList(value: unknown): value is LiveAdjustmentEvent[] {
     }
 
     const event = entry as Partial<LiveAdjustmentEvent>
-    const status = event.status
-
-    return (
-      (event.type === 'injury' || event.type === 'temporary-out' || event.type === 'return') &&
+    const status = 'status' in event ? event.status : undefined
+    const hasBaseFields =
       typeof event.period === 'number' &&
       Number.isInteger(event.period) &&
       event.period >= 1 &&
       typeof event.minute === 'number' &&
       Number.isFinite(event.minute) &&
       typeof event.playerId === 'string' &&
-      event.playerId.length > 0 &&
+      event.playerId.length > 0
+
+    if (!hasBaseFields || typeof event.type !== 'string') {
+      return false
+    }
+
+    if (event.type === 'position-swap') {
+      return typeof event.targetPlayerId === 'string' && event.targetPlayerId.length > 0
+    }
+
+    return (
+      (event.type === 'injury' || event.type === 'temporary-out' || event.type === 'return') &&
       typeof event.replacementPlayerId === 'string' &&
       event.replacementPlayerId.length > 0 &&
       (status === undefined || status === 'injured' || status === 'temporarily-out')

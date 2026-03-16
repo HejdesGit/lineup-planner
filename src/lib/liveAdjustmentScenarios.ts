@@ -68,15 +68,33 @@ type ScenarioStep =
     minute: number
     target: ScenarioTarget
   }
+  | {
+    id: string
+    label: string
+    type: 'position-swap'
+    period: number
+    minute: number
+    target: ScenarioTarget
+    swapTarget: ScenarioTarget
+  }
 
 type ScenarioTarget =
   | {
     type: 'first-active-outfielder'
   }
   | {
+    type: 'second-active-outfielder'
+  }
+  | {
+    type: 'active-goalkeeper'
+  }
+  | {
+    type: 'first-available-bench-player'
+  }
+  | {
     type: 'previous-result'
     stepId: string
-    field: 'playerId' | 'replacementPlayerId'
+    field: 'playerId' | 'replacementPlayerId' | 'targetPlayerId'
   }
 
 interface ScenarioPreset {
@@ -93,19 +111,29 @@ interface ScenarioState {
   eventLog: LiveScenarioEventLogEntry[]
   eventNarrative: string[]
   plan: MatchPlan
-  stepResults: Record<
-    string,
-    {
-      playerId: string
-      replacementPlayerId: string | null
-    }
-  >
+  stepResults: Record<string, ScenarioStepResult>
   unavailableLeakCheckPassed: boolean
 }
 
+type ScenarioStepResult =
+  | {
+    type: 'injury' | 'temporary-out' | 'return'
+    playerId: string
+    replacementPlayerId: string | null
+    targetPlayerId?: never
+  }
+  | {
+    type: 'position-swap'
+    playerId: string
+    replacementPlayerId?: never
+    targetPlayerId: string | null
+  }
+
 interface AppliedScenarioEvent {
+  type: ScenarioStep['type']
   playerId: string
-  replacementPlayerId: string | null
+  replacementPlayerId?: string | null
+  targetPlayerId?: string | null
   state: ScenarioState
 }
 
@@ -133,8 +161,8 @@ export interface LiveScenarioEventLogEntry {
   period: number
   playerId: string
   playerName: string
-  poolType: 'bench' | 'active-outfield' | 'none'
-  position: LiveRecommendationPosition
+  poolType: 'bench' | 'active-outfield' | 'active-goalkeeper' | 'none'
+  position: LiveRecommendationPosition | 'Bench'
   recommendationPoolSize: number
   recommendationRank: number
   recommendationReason: string
@@ -143,6 +171,7 @@ export interface LiveScenarioEventLogEntry {
   replacementPlayerId: string
   replacementPlayerName: string
   resolvedChunkWindowIndex: number
+  swapTargetPosition?: LiveRecommendationPosition | 'Bench'
   stepId: string
   type: ScenarioStep['type']
 }
@@ -699,6 +728,75 @@ const SCENARIO_PRESETS: ScenarioPreset[] = [
     ],
   },
   {
+    id: 'position-swap-outfield',
+    name: 'Position swap between outfield players',
+    description:
+      'En aktiv utespelare byter plats live med en annan aktiv utespelare mitt i period 2, utan att någon lämnar planen.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260401,
+    }),
+    steps: [
+      {
+        id: 'swap-outfield',
+        label: 'En aktiv utespelare byter position med en annan aktiv utespelare i period 2 minut 10.',
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        target: { type: 'first-active-outfielder' },
+        swapTarget: { type: 'second-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'position-swap-goalkeeper',
+    name: 'Position swap with goalkeeper',
+    description:
+      'En aktiv utespelare byter plats live med den aktiva målvakten, så att både MV och utespelsposition uppdateras från samma minut.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260402,
+    }),
+    steps: [
+      {
+        id: 'swap-goalkeeper',
+        label: 'En aktiv utespelare byter plats med målvakten i period 2 minut 10.',
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        target: { type: 'first-active-outfielder' },
+        swapTarget: { type: 'active-goalkeeper' },
+      },
+    ],
+  },
+  {
+    id: 'position-swap-bench',
+    name: 'Position swap with bench player',
+    description:
+      'En aktiv utespelare gör ett live-positionsbyte med en tillgänglig bänkspelare, så att bänken också täcks av swapflödet.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodMinutes: 20,
+      seed: 20260403,
+    }),
+    steps: [
+      {
+        id: 'swap-bench',
+        label: 'En aktiv utespelare byter plats live med första tillgängliga bänkspelaren i period 2 minut 10.',
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        target: { type: 'first-active-outfielder' },
+        swapTarget: { type: 'first-available-bench-player' },
+      },
+    ],
+  },
+  {
     id: 'empty-bench-no-options',
     name: 'Empty bench no options',
     description:
@@ -936,6 +1034,88 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
     throw new Error(`Saknar aktivt byteblock för scenariosteget ${step.id}.`)
   }
 
+  if (step.type === 'position-swap') {
+    const swapTargetPlayerId = resolveScenarioTargetPlayerId(state, step, step.swapTarget)
+    const sourcePosition = getPlayerPositionLabel(currentChunk, state.plan, targetPlayerId)
+    const targetPosition = getPlayerPositionLabel(currentChunk, state.plan, swapTargetPlayerId)
+    const next = replanMatchFromLiveEvent({
+      availability: state.availability,
+      event: {
+        type: 'position-swap',
+        minute: step.minute,
+        period: step.period,
+        playerId: targetPlayerId,
+        targetPlayerId: swapTargetPlayerId,
+      },
+      plan: state.plan,
+    })
+    const playerNameById = Object.fromEntries(
+      next.plan.summaries.map((summary) => [summary.playerId, summary.name]),
+    ) as Record<string, string>
+    const chunkSplitApplied = wasChunkSplitApplied(currentChunk, next.plan, step.period, step.minute)
+    const nextNarrative = formatPositionSwapNarrative({
+      chunkWindowIndex: resolvedChunk.chunkIndex + 1,
+      isExactBoundaryMinute: resolvedChunk.isExactBoundaryMinute,
+      minute: step.minute,
+      period: step.period,
+      playerName: playerNameById[targetPlayerId],
+      sourcePosition,
+      swapTargetName: playerNameById[swapTargetPlayerId],
+      swapTargetPosition: targetPosition,
+    })
+
+    return {
+      type: step.type,
+      playerId: targetPlayerId,
+      targetPlayerId: swapTargetPlayerId,
+      state: {
+        availability: next.availability,
+        eventLog: [
+          ...state.eventLog,
+          {
+            chunkSplitApplied,
+            chunkWindowIndex: resolvedChunk.chunkIndex + 1,
+            description: nextNarrative,
+            didNotReturnBeforeFinalWhistle: false,
+            eventApplied: true,
+            futureGoalkeeperMinutes: 0,
+            goalkeeperPenaltyApplied: false,
+            isExactBoundaryMinute: resolvedChunk.isExactBoundaryMinute,
+            label: step.label,
+            minute: step.minute,
+            period: step.period,
+            playerId: targetPlayerId,
+            playerName: playerNameById[targetPlayerId],
+            poolType: getSwapPoolType(currentChunk, swapTargetPlayerId),
+            position: targetPosition,
+            recommendationPoolSize: 1,
+            recommendationRank: 1,
+            recommendationReason: 'Explicit live positionsväxling.',
+            recommendationScore: 0,
+            replacementFromExpectedPool: isSwapFromExpectedPool(currentChunk, swapTargetPlayerId),
+            replacementPlayerId: swapTargetPlayerId,
+            replacementPlayerName: playerNameById[swapTargetPlayerId],
+            resolvedChunkWindowIndex: resolvedChunk.chunkIndex + 1,
+            swapTargetPosition: sourcePosition,
+            stepId: step.id,
+            type: step.type,
+          },
+        ],
+        eventNarrative: [...state.eventNarrative, nextNarrative],
+        plan: next.plan,
+        stepResults: {
+          ...state.stepResults,
+          [step.id]: {
+            type: step.type,
+            playerId: targetPlayerId,
+            targetPlayerId: swapTargetPlayerId,
+          },
+        },
+        unavailableLeakCheckPassed: state.unavailableLeakCheckPassed,
+      },
+    }
+  }
+
   const recommendations = getLiveRecommendations({
     availability: state.availability,
     minute: step.minute,
@@ -959,6 +1139,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
     })
 
     return {
+      type: step.type,
       playerId: targetPlayerId,
       replacementPlayerId: null,
       state: {
@@ -997,6 +1178,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
         stepResults: {
           ...state.stepResults,
           [step.id]: {
+            type: step.type,
             playerId: targetPlayerId,
             replacementPlayerId: null,
           },
@@ -1065,6 +1247,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
       !isPlayerActiveFromMinute(next.plan, step.period, step.minute, targetPlayerId)
 
   return {
+    type: step.type,
     playerId: targetPlayerId,
     replacementPlayerId: selectedRecommendation.playerId,
     state: {
@@ -1104,6 +1287,7 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
       stepResults: {
         ...state.stepResults,
         [step.id]: {
+          type: step.type,
           playerId: targetPlayerId,
           replacementPlayerId: selectedRecommendation.playerId,
         },
@@ -1113,15 +1297,21 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
   }
 }
 
-function resolveScenarioTargetPlayerId(state: ScenarioState, step: ScenarioStep): string {
-  if (step.target.type === 'previous-result') {
-    const previous = state.stepResults[step.target.stepId]
+function resolveScenarioTargetPlayerId(
+  state: ScenarioState,
+  step: ScenarioStep,
+  targetOverride?: ScenarioTarget,
+): string {
+  const target = targetOverride ?? step.target
+
+  if (target.type === 'previous-result') {
+    const previous = state.stepResults[target.stepId]
 
     if (!previous) {
-      throw new Error(`Saknar tidigare scenariosteg ${step.target.stepId}.`)
+      throw new Error(`Saknar tidigare scenariosteg ${target.stepId}.`)
     }
 
-    const targetPlayerId = previous[step.target.field]
+    const targetPlayerId = previous[target.field]
 
     if (!targetPlayerId) {
       throw new Error(`Saknar tidigare spelarreferens för scenariosteget ${step.id}.`)
@@ -1136,7 +1326,16 @@ function resolveScenarioTargetPlayerId(state: ScenarioState, step: ScenarioStep)
     throw new Error(`Saknar aktivt byteblock för scenariosteget ${step.id}.`)
   }
 
-  return getDefaultOutfieldPlayerId(chunk, state.plan)
+  switch (target.type) {
+    case 'first-active-outfielder':
+      return getOutfieldPlayerIdByIndex(chunk, state.plan, 0)
+    case 'second-active-outfielder':
+      return getOutfieldPlayerIdByIndex(chunk, state.plan, 1)
+    case 'active-goalkeeper':
+      return chunk.goalkeeperId
+    case 'first-available-bench-player':
+      return getFirstAvailableBenchPlayerId(chunk, state)
+  }
 }
 
 function finalizeScenarioReport(preset: ScenarioPreset, state: ScenarioState): LiveScenarioReport {
@@ -1180,6 +1379,7 @@ function finalizeScenarioReport(preset: ScenarioPreset, state: ScenarioState): L
   const recommendationLooksReasonable = eventLog.every(
     (event) =>
       !event.eventApplied ||
+      event.type === 'position-swap' ||
       (event.recommendationRank === 1 &&
         event.recommendationPoolSize > 0 &&
         event.replacementFromExpectedPool),
@@ -1378,7 +1578,7 @@ function formatScenarioEventNarrative({
   recommendationPoolSize: number
   recommendationRank: number
   replacementName: string
-  type: ScenarioStep['type']
+  type: Exclude<ScenarioStep['type'], 'position-swap'>
 }) {
   const boundaryNote = isExactBoundaryMinute ? ', exakt chunkgräns' : ''
   const goalkeeperNote = goalkeeperPenaltyApplied
@@ -1396,6 +1596,30 @@ function formatScenarioEventNarrative({
   return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} tillfälligt ute, ${replacementName} in på ${position} (rek #${recommendationRank}/${recommendationPoolSize}, byteblock ${chunkWindowIndex}${boundaryNote}${goalkeeperNote}).`
 }
 
+function formatPositionSwapNarrative({
+  chunkWindowIndex,
+  isExactBoundaryMinute,
+  minute,
+  period,
+  playerName,
+  sourcePosition,
+  swapTargetName,
+  swapTargetPosition,
+}: {
+  chunkWindowIndex: number
+  isExactBoundaryMinute: boolean
+  minute: number
+  period: number
+  playerName: string
+  sourcePosition: LiveRecommendationPosition | 'Bench'
+  swapTargetName: string
+  swapTargetPosition: LiveRecommendationPosition | 'Bench'
+}) {
+  const boundaryNote = isExactBoundaryMinute ? ', exakt chunkgräns' : ''
+
+  return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} positionsbyter med ${swapTargetName} (${sourcePosition} <-> ${swapTargetPosition}, byteblock ${chunkWindowIndex}${boundaryNote}).`
+}
+
 function formatNoRecommendationNarrative({
   minute,
   period,
@@ -1405,7 +1629,7 @@ function formatNoRecommendationNarrative({
   minute: number
   period: number
   playerName: string
-  type: ScenarioStep['type']
+  type: Exclude<ScenarioStep['type'], 'position-swap'>
 }) {
   if (type === 'return') {
     return `P${period} ${formatMinuteQuantity(minute)}: ${playerName} vill tillbaka, men ingen aktiv utespelare kan bytas ut just nu.`
@@ -1419,13 +1643,17 @@ function formatNoRecommendationNarrative({
 }
 
 function isReplacementFromExpectedPool(
-  type: ScenarioStep['type'],
+  type: Exclude<ScenarioStep['type'], 'position-swap'>,
   chunk: ChunkPlan,
   replacementPlayerId: string,
 ) {
   return type === 'injury' || type === 'temporary-out'
     ? !chunk.activePlayerIds.includes(replacementPlayerId)
     : Object.values(chunk.lineup).includes(replacementPlayerId)
+}
+
+function isSwapFromExpectedPool(_chunk: ChunkPlan, _targetPlayerId: string) {
+  return true
 }
 
 function wasChunkSplitApplied(
@@ -1459,16 +1687,37 @@ function resolveScenarioChunkAtMinute(plan: MatchPlan, period: number, minute: n
   return resolveChunkAtMinute(currentPeriod, minute)
 }
 
-function getDefaultOutfieldPlayerId(chunk: ChunkPlan, plan: MatchPlan) {
+function getOutfieldPlayerIdByIndex(chunk: ChunkPlan, plan: MatchPlan, targetIndex: number) {
+  let currentIndex = 0
+
   for (const position of plan.positions) {
     const playerId = chunk.lineup[position]
 
     if (playerId) {
-      return playerId
+      if (currentIndex === targetIndex) {
+        return playerId
+      }
+
+      currentIndex += 1
     }
   }
 
-  throw new Error('Hittade ingen aktiv utespelare i byteblocket.')
+  throw new Error('Hittade inte tillräckligt många aktiva utespelare i byteblocket.')
+}
+
+function getFirstAvailableBenchPlayerId(chunk: ChunkPlan, state: ScenarioState) {
+  const benchPlayerId = state.plan.summaries
+    .map((summary) => summary.playerId)
+    .find(
+      (playerId) =>
+        !chunk.activePlayerIds.includes(playerId) && state.availability[playerId] === 'available',
+    )
+
+  if (!benchPlayerId) {
+    throw new Error('Hittade ingen tillgänglig bänkspelare i byteblocket.')
+  }
+
+  return benchPlayerId
 }
 
 function getDefaultOutfieldPosition(chunk: ChunkPlan, plan: MatchPlan) {
@@ -1479,6 +1728,32 @@ function getDefaultOutfieldPosition(chunk: ChunkPlan, plan: MatchPlan) {
   }
 
   throw new Error('Hittade ingen aktiv utespelarposition i byteblocket.')
+}
+
+function getPlayerPositionLabel(
+  chunk: ChunkPlan,
+  plan: MatchPlan,
+  playerId: string,
+): LiveRecommendationPosition | 'Bench' {
+  if (chunk.goalkeeperId === playerId) {
+    return 'MV'
+  }
+
+  for (const position of plan.positions) {
+    if (chunk.lineup[position] === playerId) {
+      return position
+    }
+  }
+
+  return 'Bench'
+}
+
+function getSwapPoolType(chunk: ChunkPlan, targetPlayerId: string): LiveScenarioEventLogEntry['poolType'] {
+  if (chunk.goalkeeperId === targetPlayerId) {
+    return 'active-goalkeeper'
+  }
+
+  return chunk.activePlayerIds.includes(targetPlayerId) ? 'active-outfield' : 'bench'
 }
 
 function isPlayerActiveFromMinute(plan: MatchPlan, period: number, minute: number, playerId: string) {

@@ -38,6 +38,9 @@ export const ALL_AUDIT_LIVE_PATTERNS = [
   'injury-mid-match',
   'double-temporary-out',
   'cross-period-return',
+  'position-swap-outfield',
+  'position-swap-goalkeeper',
+  'position-swap-bench',
 ] as const
 export const DEFAULT_AUDIT_LIVE_PATTERNS =
   ['none'] as const satisfies readonly (typeof ALL_AUDIT_LIVE_PATTERNS)[number][]
@@ -166,14 +169,26 @@ export interface AuditInputSnapshot {
   attempts: number
 }
 
-export interface LiveAdjustmentAuditEvent {
+interface BaseLiveAdjustmentAuditEvent {
   stepId: string
-  type: LiveAdjustmentEvent['type']
   period: number
   minute: number
   playerId: string
+}
+
+export interface LiveAvailabilityAuditEvent extends BaseLiveAdjustmentAuditEvent {
+  type: Exclude<LiveAdjustmentEvent['type'], 'position-swap'>
   replacementPlayerId: string | null
 }
+
+export interface LivePositionSwapAuditEvent extends BaseLiveAdjustmentAuditEvent {
+  type: 'position-swap'
+  targetPlayerId: string | null
+}
+
+export type LiveAdjustmentAuditEvent =
+  | LiveAvailabilityAuditEvent
+  | LivePositionSwapAuditEvent
 
 export interface LiveAdjustmentAudit {
   pattern: Exclude<LiveAdjustmentPattern, 'none'>
@@ -779,18 +794,52 @@ type LivePatternTarget =
     type: 'first-active-outfielder'
   }
   | {
+    type: 'second-active-outfielder'
+  }
+  | {
+    type: 'active-goalkeeper'
+  }
+  | {
+    type: 'first-available-bench-player'
+  }
+  | {
     type: 'previous-result'
     stepId: string
-    field: 'playerId' | 'replacementPlayerId'
+    field: 'playerId' | 'replacementPlayerId' | 'targetPlayerId'
   }
 
-interface LivePatternStep {
+interface LiveAvailabilityPatternStep {
   id: string
-  type: LiveAdjustmentEvent['type']
+  type: Exclude<LiveAdjustmentEvent['type'], 'position-swap'>
   period: number
   minute: number
   target: LivePatternTarget
 }
+
+interface LivePositionSwapPatternStep {
+  id: string
+  type: 'position-swap'
+  period: number
+  minute: number
+  target: LivePatternTarget
+  swapTarget: LivePatternTarget
+}
+
+type LivePatternStep = LiveAvailabilityPatternStep | LivePositionSwapPatternStep
+
+type LivePatternStepResult =
+  | {
+    type: Exclude<LiveAdjustmentEvent['type'], 'position-swap'>
+    playerId: string
+    replacementPlayerId: string | null
+    targetPlayerId?: never
+  }
+  | {
+    type: 'position-swap'
+    playerId: string
+    replacementPlayerId?: never
+    targetPlayerId: string | null
+  }
 
 interface AppliedLiveAdjustmentPattern {
   plan: MatchPlan
@@ -814,13 +863,7 @@ function applyLiveAdjustmentPattern(
   pattern: Exclude<LiveAdjustmentPattern, 'none'>,
 ): AppliedLiveAdjustmentPattern {
   const steps = getLivePatternSteps(pattern)
-  const stepResults: Record<
-    string,
-    {
-      playerId: string
-      replacementPlayerId: string | null
-    }
-  > = {}
+  const stepResults: Record<string, LivePatternStepResult> = {}
   const events: LiveAdjustmentAuditEvent[] = []
   let currentPlan = plan
   let availability = createInitialAvailabilityState(plan)
@@ -828,7 +871,70 @@ function applyLiveAdjustmentPattern(
   let completed = true
 
   for (const step of steps) {
-    const targetPlayerId = resolveLivePatternTargetPlayerId(currentPlan, step, stepResults)
+    const targetPlayerId = resolveLivePatternTargetPlayerId(
+      currentPlan,
+      step,
+      stepResults,
+      availability,
+    )
+    if (step.type === 'position-swap') {
+      const swapTargetPlayerId = resolveLivePatternTargetPlayerId(
+        currentPlan,
+        step,
+        stepResults,
+        availability,
+        step.swapTarget,
+      )
+
+      try {
+        const next = replanMatchFromLiveEvent({
+          availability,
+          event: {
+            type: 'position-swap',
+            minute: step.minute,
+            period: step.period,
+            playerId: targetPlayerId,
+            targetPlayerId: swapTargetPlayerId,
+          },
+          plan: currentPlan,
+        })
+
+        currentPlan = next.plan
+        availability = next.availability
+        events.push({
+          stepId: step.id,
+          type: step.type,
+          period: step.period,
+          minute: step.minute,
+          playerId: targetPlayerId,
+          targetPlayerId: swapTargetPlayerId,
+        })
+        stepResults[step.id] = {
+          type: step.type,
+          playerId: targetPlayerId,
+          targetPlayerId: swapTargetPlayerId,
+        }
+      } catch {
+        events.push({
+          stepId: step.id,
+          type: step.type,
+          period: step.period,
+          minute: step.minute,
+          playerId: targetPlayerId,
+          targetPlayerId: null,
+        })
+        stepResults[step.id] = {
+          type: step.type,
+          playerId: targetPlayerId,
+          targetPlayerId: null,
+        }
+        completed = false
+        break
+      }
+
+      continue
+    }
+
     const selectedRecommendation = getLiveRecommendations({
       availability,
       minute: step.minute,
@@ -848,6 +954,7 @@ function applyLiveAdjustmentPattern(
         replacementPlayerId: null,
       })
       stepResults[step.id] = {
+        type: step.type,
         playerId: targetPlayerId,
         replacementPlayerId: null,
       }
@@ -898,6 +1005,7 @@ function applyLiveAdjustmentPattern(
       replacementPlayerId: selectedRecommendation.playerId,
     })
     stepResults[step.id] = {
+      type: step.type,
       playerId: targetPlayerId,
       replacementPlayerId: selectedRecommendation.playerId,
     }
@@ -994,6 +1102,39 @@ function getLivePatternSteps(
           target: { type: 'previous-result', stepId: 'cross-period-out', field: 'playerId' },
         },
       ]
+    case 'position-swap-outfield':
+      return [
+        {
+          id: 'swap-outfield',
+          type: 'position-swap',
+          period: 2,
+          minute: 10,
+          target: { type: 'first-active-outfielder' },
+          swapTarget: { type: 'second-active-outfielder' },
+        },
+      ]
+    case 'position-swap-goalkeeper':
+      return [
+        {
+          id: 'swap-goalkeeper',
+          type: 'position-swap',
+          period: 2,
+          minute: 10,
+          target: { type: 'first-active-outfielder' },
+          swapTarget: { type: 'active-goalkeeper' },
+        },
+      ]
+    case 'position-swap-bench':
+      return [
+        {
+          id: 'swap-bench',
+          type: 'position-swap',
+          period: 2,
+          minute: 10,
+          target: { type: 'first-active-outfielder' },
+          swapTarget: { type: 'first-available-bench-player' },
+        },
+      ]
   }
 
   const exhaustivePattern: never = pattern
@@ -1003,16 +1144,20 @@ function getLivePatternSteps(
 function resolveLivePatternTargetPlayerId(
   plan: MatchPlan,
   step: LivePatternStep,
-  stepResults: Record<string, { playerId: string; replacementPlayerId: string | null }>,
+  stepResults: Record<string, LivePatternStepResult>,
+  availability: Record<string, 'available' | 'injured' | 'temporarily-out'>,
+  targetOverride?: LivePatternTarget,
 ) {
-  if (step.target.type === 'previous-result') {
-    const previous = stepResults[step.target.stepId]
+  const target = targetOverride ?? step.target
+
+  if (target.type === 'previous-result') {
+    const previous = stepResults[target.stepId]
 
     if (!previous) {
-      throw new Error(`Saknar tidigare livejusteringssteg ${step.target.stepId}.`)
+      throw new Error(`Saknar tidigare livejusteringssteg ${target.stepId}.`)
     }
 
-    const targetPlayerId = previous[step.target.field]
+    const targetPlayerId = previous[target.field]
 
     if (!targetPlayerId) {
       throw new Error(`Saknar spelarreferens för livejusteringssteget ${step.id}.`)
@@ -1027,7 +1172,16 @@ function resolveLivePatternTargetPlayerId(
     throw new Error(`Saknar aktivt byteblock för livejusteringssteget ${step.id}.`)
   }
 
-  return getDefaultOutfieldPlayerId(chunk, plan)
+  switch (target.type) {
+    case 'first-active-outfielder':
+      return getOutfieldPlayerIdByIndex(chunk, plan, 0)
+    case 'second-active-outfielder':
+      return getOutfieldPlayerIdByIndex(chunk, plan, 1)
+    case 'active-goalkeeper':
+      return chunk.goalkeeperId
+    case 'first-available-bench-player':
+      return getFirstAvailableBenchPlayerId(chunk, plan, availability, step.id)
+  }
 }
 
 function resolveLivePatternChunkAtMinute(plan: MatchPlan, period: number, minute: number) {
@@ -1040,19 +1194,46 @@ function resolveLivePatternChunkAtMinute(plan: MatchPlan, period: number, minute
   return resolveChunkAtMinute(currentPeriod, minute)
 }
 
-function getDefaultOutfieldPlayerId(
+function getOutfieldPlayerIdByIndex(
   chunk: MatchPlan['periods'][number]['chunks'][number],
   plan: MatchPlan,
+  targetIndex: number,
 ) {
+  let currentIndex = 0
+
   for (const position of plan.positions) {
     const playerId = chunk.lineup[position]
 
     if (playerId) {
-      return playerId
+      if (currentIndex === targetIndex) {
+        return playerId
+      }
+
+      currentIndex += 1
     }
   }
 
-  throw new Error('Hittade ingen aktiv utespelare i byteblocket.')
+  throw new Error('Hittade inte tillräckligt många aktiva utespelare i byteblocket.')
+}
+
+function getFirstAvailableBenchPlayerId(
+  chunk: MatchPlan['periods'][number]['chunks'][number],
+  plan: MatchPlan,
+  availability: Record<string, 'available' | 'injured' | 'temporarily-out'>,
+  stepId: string,
+) {
+  const benchPlayerId = plan.summaries
+    .map((summary) => summary.playerId)
+    .find(
+      (playerId) =>
+        !chunk.activePlayerIds.includes(playerId) && availability[playerId] === 'available',
+    )
+
+  if (!benchPlayerId) {
+    throw new Error(`Hittade ingen tillgänglig bänkspelare för livejusteringssteget ${stepId}.`)
+  }
+
+  return benchPlayerId
 }
 
 function isPlayerActiveFromMinute(plan: MatchPlan, period: number, minute: number, playerId: string) {

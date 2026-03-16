@@ -38,17 +38,30 @@ export interface ChunkSubstitution {
 }
 
 export type PlayerAvailabilityStatus = 'available' | 'injured' | 'temporarily-out'
-export type LiveAdjustmentEventType = 'injury' | 'temporary-out' | 'return'
+export type LiveAvailabilityEventType = 'injury' | 'temporary-out' | 'return'
+export type LiveAdjustmentEventType = LiveAvailabilityEventType | 'position-swap'
 
-export interface LiveAdjustmentEvent {
-  type: LiveAdjustmentEventType
+interface BaseLiveAdjustmentEvent {
   period: number
   minute: number
   playerId: string
+}
+
+export interface LiveAvailabilityAdjustmentEvent extends BaseLiveAdjustmentEvent {
+  type: LiveAvailabilityEventType
   replacementPlayerId: string
   role?: LiveAdjustmentRole
   status?: Exclude<PlayerAvailabilityStatus, 'available'>
 }
+
+export interface LivePositionSwapEvent extends BaseLiveAdjustmentEvent {
+  type: 'position-swap'
+  targetPlayerId: string
+}
+
+export type LiveAdjustmentEvent =
+  | LiveAvailabilityAdjustmentEvent
+  | LivePositionSwapEvent
 
 export type LiveAvailabilityState = Record<string, PlayerAvailabilityStatus>
 

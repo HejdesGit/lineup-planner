@@ -203,6 +203,18 @@ describe('generate-lineup-audit CLI', () => {
         liveScenarioId: 'cross-period-return',
         seed: 20260327,
       },
+      'position-swap-outfield': {
+        liveScenarioId: 'position-swap-outfield',
+        seed: 20260401,
+      },
+      'position-swap-goalkeeper': {
+        liveScenarioId: 'position-swap-goalkeeper',
+        seed: 20260402,
+      },
+      'position-swap-bench': {
+        liveScenarioId: 'position-swap-bench',
+        seed: 20260403,
+      },
     } as const satisfies Record<
       Exclude<LiveAdjustmentPattern, 'none'>,
       {
@@ -268,6 +280,11 @@ describe('generate-lineup-audit CLI', () => {
           minute,
         })),
       )
+      expect(
+        auditRecord.liveAdjustment?.events.every((event) =>
+          event.type === 'position-swap' ? Boolean(event.targetPlayerId) : true,
+        ),
+      ).toBe(true)
     }
   })
 })

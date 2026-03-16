@@ -31,7 +31,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
-import { AlertTriangle, Lock, LockOpen, UserMinus, UserPlus } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Lock, LockOpen, UserMinus, UserPlus } from 'lucide-react'
 import {
   applyLiveAdjustmentEvents,
   createInitialAvailabilityState,
@@ -183,7 +183,16 @@ interface InitialAppState {
   activeMatchTimer: StoredActiveMatchTimer | null
 }
 
+interface PositionSwapCandidate {
+  playerId: string
+  position: string
+}
+
 type LiveEventDraft =
+  | {
+      type: 'action-picker'
+      playerId: string
+    }
   | {
       type: 'unavailable'
       playerId: string
@@ -197,6 +206,12 @@ type LiveEventDraft =
       role: LiveAdjustmentRole
       recommendations: LiveRecommendation[]
       selectedReplacementPlayerId: string | null
+    }
+  | {
+      type: 'position-swap'
+      playerId: string
+      candidates: PositionSwapCandidate[]
+      selectedTargetPlayerId: string | null
     }
 
 function formReducer(state: FormState, action: FormAction): FormState {
@@ -271,6 +286,10 @@ function App() {
     const nextRoles: Record<string, LiveAdjustmentRole> = {}
 
     for (const event of liveEvents) {
+      if (event.type === 'position-swap') {
+        continue
+      }
+
       if (event.type === 'return') {
         delete nextRoles[event.playerId]
         continue
@@ -494,16 +513,20 @@ function App() {
     )
   }
 
-  const handleApplyLiveEvent = ({
-    playerId,
-    replacementPlayerId,
-    role,
-    status,
-  }: {
+  const handleApplyLiveEvent = (event: {
+    type: 'temporary-out'
     playerId: string
     replacementPlayerId: string
     role: LiveAdjustmentRole
-    status: 'temporarily-out' | 'return'
+  } | {
+    type: 'return'
+    playerId: string
+    replacementPlayerId: string
+    role: LiveAdjustmentRole
+  } | {
+    type: 'position-swap'
+    playerId: string
+    targetPlayerId: string
   }) => {
     if (!displayPlan || !liveAvailability || !matchTimeline || !activeMatchTimer) {
       return
@@ -524,25 +547,36 @@ function App() {
     const minute = roundMinuteValue(liveProgress.elapsedMs / 60_000)
 
     try {
-      const nextEvent: LiveAdjustmentEvent =
-        status === 'return'
-          ? {
-              type: 'return',
-              period: activePeriod,
-              minute,
-              playerId,
-              replacementPlayerId,
-              role,
-            }
-          : {
-              type: 'temporary-out',
-              period: activePeriod,
-              minute,
-              playerId,
-              replacementPlayerId,
-              role,
-              status: 'temporarily-out',
-            }
+      let nextEvent: LiveAdjustmentEvent
+
+      if (event.type === 'position-swap') {
+        nextEvent = {
+          type: event.type,
+          period: activePeriod,
+          minute,
+          playerId: event.playerId,
+          targetPlayerId: event.targetPlayerId,
+        }
+      } else if (event.type === 'return') {
+        nextEvent = {
+          type: event.type,
+          period: activePeriod,
+          minute,
+          playerId: event.playerId,
+          replacementPlayerId: event.replacementPlayerId,
+          role: event.role,
+        }
+      } else {
+        nextEvent = {
+          type: event.type,
+          period: activePeriod,
+          minute,
+          playerId: event.playerId,
+          replacementPlayerId: event.replacementPlayerId,
+          role: event.role,
+          status: 'temporarily-out',
+        }
+      }
 
       if (overridePlan) {
         applyLiveAdjustmentEvents({
@@ -940,12 +974,24 @@ function LiveNowPanel({
   activeMinute: number
   activeChunkIndex: number
   unavailableRoleById: Record<string, LiveAdjustmentRole>
-  onApplyLiveEvent: (event: {
-    playerId: string
-    replacementPlayerId: string
-    role: LiveAdjustmentRole
-    status: 'temporarily-out' | 'return'
-  }) => void
+  onApplyLiveEvent: (event:
+    | {
+        type: 'temporary-out'
+        playerId: string
+        replacementPlayerId: string
+        role: LiveAdjustmentRole
+      }
+    | {
+        type: 'return'
+        playerId: string
+        replacementPlayerId: string
+        role: LiveAdjustmentRole
+      }
+    | {
+        type: 'position-swap'
+        playerId: string
+        targetPlayerId: string
+      }) => void
 }) {
   const activeChunk = period.chunks[activeChunkIndex] ?? null
   const allPlayerIds = useMemo(
@@ -973,6 +1019,11 @@ function LiveNowPanel({
   )
   const [liveDraft, setLiveDraft] = useState<LiveEventDraft | null>(null)
 
+  const createActionPickerDraft = (playerId: string): LiveEventDraft => ({
+    type: 'action-picker',
+    playerId,
+  })
+
   const createUnavailableDraft = (playerId: string): LiveEventDraft => {
     const role: LiveAdjustmentRole = activeChunk?.goalkeeperId === playerId ? 'goalkeeper' : 'outfield'
     const recommendations = getLiveRecommendations({
@@ -991,6 +1042,36 @@ function LiveNowPanel({
       role,
       recommendations,
       selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
+    }
+  }
+
+  const createPositionSwapDraft = (playerId: string): LiveEventDraft => {
+    const candidates = [
+      ...period.positions
+        .map((position) => ({
+          playerId: activeChunk?.lineup[position] ?? null,
+          position,
+        }))
+        .filter(
+          (candidate): candidate is { playerId: string; position: OutfieldPosition } =>
+            candidate.playerId !== null && candidate.playerId !== playerId,
+        ),
+      ...(activeChunk && activeChunk.goalkeeperId !== playerId
+        ? [{ playerId: activeChunk.goalkeeperId, position: 'MV' as const }]
+        : []),
+      ...availableBenchPlayerIds
+        .filter((candidateId) => candidateId !== playerId)
+        .map((candidateId, index) => ({
+          playerId: candidateId,
+          position: getBenchSlotId(index),
+        })),
+    ]
+
+    return {
+      type: 'position-swap',
+      playerId,
+      candidates,
+      selectedTargetPlayerId: candidates[0]?.playerId ?? null,
     }
   }
 
@@ -1016,15 +1097,33 @@ function LiveNowPanel({
   }
 
   const handleConfirmLiveDraft = () => {
-    if (!liveDraft?.selectedReplacementPlayerId) {
+    if (!liveDraft) {
+      return
+    }
+
+    if (liveDraft.type === 'position-swap') {
+      if (!liveDraft.selectedTargetPlayerId) {
+        return
+      }
+
+      onApplyLiveEvent({
+        type: 'position-swap',
+        playerId: liveDraft.playerId,
+        targetPlayerId: liveDraft.selectedTargetPlayerId,
+      })
+      setLiveDraft(null)
+      return
+    }
+
+    if (liveDraft.type === 'action-picker' || !liveDraft.selectedReplacementPlayerId) {
       return
     }
 
     onApplyLiveEvent({
+      type: liveDraft.type === 'return' ? 'return' : 'temporary-out',
       playerId: liveDraft.playerId,
       replacementPlayerId: liveDraft.selectedReplacementPlayerId,
       role: liveDraft.role,
-      status: liveDraft.type === 'return' ? 'return' : 'temporarily-out',
     })
     setLiveDraft(null)
   }
@@ -1063,10 +1162,9 @@ function LiveNowPanel({
         lineup={activeChunk.lineup}
         goalkeeperId={activeChunk.goalkeeperId}
         nameById={nameById}
-        onMarkUnavailable={(playerId) => {
-          const nextDraft = createUnavailableDraft(playerId)
-          setLiveDraft(nextDraft)
-        }}
+        onOpenActionPicker={(playerId) => setLiveDraft(createActionPickerDraft(playerId))}
+        onMarkUnavailable={(playerId) => setLiveDraft(createUnavailableDraft(playerId))}
+        onStartPositionSwap={(playerId) => setLiveDraft(createPositionSwapDraft(playerId))}
       />
 
       <div className="mt-3 rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3">
@@ -1118,12 +1216,16 @@ function LiveNowPanel({
           draft={liveDraft}
           playerNameById={nameById}
           onClose={() => setLiveDraft(null)}
-          onSelectReplacement={(playerId) =>
+          onChooseUnavailable={(playerId) => setLiveDraft(createUnavailableDraft(playerId))}
+          onChoosePositionSwap={(playerId) => setLiveDraft(createPositionSwapDraft(playerId))}
+          onSelectPlayer={(playerId) =>
             setLiveDraft((current) =>
-              current
+              current && current.type !== 'action-picker'
                 ? {
                     ...current,
-                    selectedReplacementPlayerId: playerId,
+                    ...(current.type === 'position-swap'
+                      ? { selectedTargetPlayerId: playerId }
+                      : { selectedReplacementPlayerId: playerId }),
                   }
                 : current,
             )
@@ -2073,13 +2175,17 @@ function LiveFormationBoard({
   lineup,
   goalkeeperId,
   nameById,
+  onOpenActionPicker,
   onMarkUnavailable,
+  onStartPositionSwap,
 }: {
   formation: FormationKey
   lineup: Lineup
   goalkeeperId: string
   nameById: Record<string, string>
+  onOpenActionPicker: (playerId: string) => void
   onMarkUnavailable: (playerId: string) => void
+  onStartPositionSwap: (playerId: string) => void
 }) {
   return (
     <div className="rounded-[1.1rem] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.14),_transparent_40%),linear-gradient(180deg,rgba(13,43,19,0.96),rgba(7,25,11,0.98))] p-3">
@@ -2096,7 +2202,9 @@ function LiveFormationBoard({
                   label={position}
                   player={playerName}
                   tone={getPositionTone(position)}
+                  onOpenActionPicker={playerId ? () => onOpenActionPicker(playerId) : undefined}
                   onMarkUnavailable={playerId ? () => onMarkUnavailable(playerId) : undefined}
+                  onStartPositionSwap={playerId ? () => onStartPositionSwap(playerId) : undefined}
                 />
               )
             })}
@@ -2107,7 +2215,9 @@ function LiveFormationBoard({
             label="MV"
             player={nameById[goalkeeperId] ?? '-'}
             tone="gk"
+            onOpenActionPicker={() => onOpenActionPicker(goalkeeperId)}
             onMarkUnavailable={() => onMarkUnavailable(goalkeeperId)}
+            onStartPositionSwap={() => onStartPositionSwap(goalkeeperId)}
           />
         </div>
       </div>
@@ -2119,12 +2229,16 @@ function LivePositionBadge({
   label,
   player,
   tone,
+  onOpenActionPicker,
   onMarkUnavailable,
+  onStartPositionSwap,
 }: {
   label: string
   player: string
   tone: 'def' | 'mid' | 'att' | 'gk'
+  onOpenActionPicker?: () => void
   onMarkUnavailable?: () => void
+  onStartPositionSwap?: () => void
 }) {
   const toneClasses = {
     def: 'border-sky-300/35 bg-[linear-gradient(180deg,rgba(56,189,248,0.18),rgba(12,74,110,0.28))] text-sky-50',
@@ -2133,56 +2247,82 @@ function LivePositionBadge({
     gk: 'border-clay-300/35 bg-[linear-gradient(180deg,rgba(251,191,36,0.18),rgba(120,53,15,0.28))] text-amber-50',
   }
   const badgeClasses = `relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${toneClasses[tone]}`
-  const badgeContent = (
-    <>
-      {onMarkUnavailable ? (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute -left-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/20 text-stone-300 backdrop-blur sm:-left-2.5 sm:-top-2.5 sm:h-9 sm:w-9"
-        >
-          <UserMinus className="h-3 w-3 sm:h-4 sm:w-4" />
-        </span>
-      ) : null}
-      <div className="pointer-events-none">
-        <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
-        <p className="mt-2 text-sm font-semibold">{player}</p>
-      </div>
-    </>
-  )
 
-  if (onMarkUnavailable) {
+  if (!onOpenActionPicker || !onMarkUnavailable || !onStartPositionSwap) {
     return (
-      <button
-        type="button"
-        onClick={onMarkUnavailable}
-        className={`${badgeClasses} cursor-pointer transition hover:border-white/20 hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
-        aria-label={`Markera ${player} som tillfälligt ute`}
-      >
-        {badgeContent}
-      </button>
+      <div className={badgeClasses}>
+        <div className="pointer-events-none">
+          <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
+          <p className="mt-2 text-sm font-semibold">{player}</p>
+        </div>
+      </div>
     )
   }
 
-  return <div className={badgeClasses}>{badgeContent}</div>
+  return (
+    <div className={`${badgeClasses} overflow-visible`}>
+      <button
+        type="button"
+        onClick={onMarkUnavailable}
+        className="absolute -left-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/20 text-stone-300 backdrop-blur transition hover:border-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 sm:-left-2.5 sm:-top-2.5 sm:h-9 sm:w-9"
+        aria-label={`Markera ${player} som tillfälligt ute på ${label}`}
+      >
+        <UserMinus className="h-3 w-3 sm:h-4 sm:w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onStartPositionSwap}
+        className="absolute -right-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/20 text-stone-300 backdrop-blur transition hover:border-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 sm:-right-2.5 sm:-top-2.5 sm:h-9 sm:w-9"
+        aria-label={`Starta positionsbyte för ${player} på ${label}`}
+      >
+        <ArrowLeftRight className="h-3 w-3 sm:h-4 sm:w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenActionPicker}
+        className="block w-full rounded-[0.7rem] px-1.5 py-1.5 transition hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+        aria-label={`Öppna liveval för ${player} på ${label}`}
+      >
+        <div className="pointer-events-none">
+          <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
+          <p className="mt-2 text-sm font-semibold">{player}</p>
+        </div>
+      </button>
+    </div>
+  )
 }
 
 function LiveAdjustmentPanel({
   draft,
   playerNameById,
   onClose,
-  onSelectReplacement,
+  onChooseUnavailable,
+  onChoosePositionSwap,
+  onSelectPlayer,
   onConfirm,
 }: {
   draft: LiveEventDraft
   playerNameById: Record<string, string>
   onClose: () => void
-  onSelectReplacement: (playerId: string) => void
+  onChooseUnavailable: (playerId: string) => void
+  onChoosePositionSwap: (playerId: string) => void
+  onSelectPlayer: (playerId: string) => void
   onConfirm: () => void
 }) {
   const title =
-    draft.type === 'return'
+    draft.type === 'action-picker'
+      ? `${playerNameById[draft.playerId]}`
+      : draft.type === 'return'
       ? `${playerNameById[draft.playerId]} är klar för spel`
+      : draft.type === 'position-swap'
+        ? `${playerNameById[draft.playerId]} positionsbyte`
       : `${playerNameById[draft.playerId]} är tillfälligt ute`
+  const canConfirm =
+    draft.type === 'position-swap'
+      ? Boolean(draft.selectedTargetPlayerId)
+      : draft.type === 'action-picker'
+        ? false
+        : Boolean(draft.selectedReplacementPlayerId)
 
   return (
     <div className="mt-3 rounded-[1rem] border border-clay-300/20 bg-black/25 p-3.5">
@@ -2202,62 +2342,131 @@ function LiveAdjustmentPanel({
         </button>
       </div>
 
-      {draft.type === 'unavailable' ? (
-        <p className="mt-3 rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-sm text-stone-300">
-          Välj vem som ska ersätta spelaren medan den är tillfälligt ute.
-        </p>
-      ) : null}
-
-      <div className="mt-3 space-y-2">
-        {draft.recommendations.length > 0 ? (
-          draft.recommendations.map((recommendation, index) => (
+      {draft.type === 'action-picker' ? (
+        <>
+          <p className="mt-3 rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-sm text-stone-300">
+            Välj vad du vill göra med {playerNameById[draft.playerId]} just nu.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <button
-              key={`live-recommendation-${draft.playerId}-${recommendation.playerId}-${recommendation.position}`}
               type="button"
-              onClick={() => onSelectReplacement(recommendation.playerId)}
-              className={`flex w-full items-start justify-between gap-3 rounded-[0.95rem] border px-3 py-3 text-left transition ${
-                draft.selectedReplacementPlayerId === recommendation.playerId
-                  ? 'border-clay-300/35 bg-clay-500/10'
-                  : 'border-white/10 bg-white/5 hover:border-white/20'
-              }`}
+              onClick={() => onChooseUnavailable(draft.playerId)}
+              className="rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-left transition hover:border-white/20 hover:bg-white/10"
             >
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  {playerNameById[recommendation.playerId]}
-                  {index === 0 ? (
-                    <span className="ml-2 rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
-                      Rek
-                    </span>
-                  ) : null}
-                </p>
-                <p className="mt-1 text-sm text-stone-300">{recommendation.reason}</p>
-              </div>
-              <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-stone-300">
-                {recommendation.position}
-              </span>
+              <p className="text-sm font-semibold text-white">
+                {playerNameById[draft.playerId]} är tillfälligt ute
+              </p>
+              <p className="mt-1 text-sm text-stone-300">Välj en ersättare från bänken.</p>
             </button>
-          ))
-        ) : (
-          <div className="rounded-[0.95rem] border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-sm text-amber-50">
-            Det finns ingen tillgänglig rekommendation just nu.
+            <button
+              type="button"
+              onClick={() => onChoosePositionSwap(draft.playerId)}
+              className="rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-left transition hover:border-white/20 hover:bg-white/10"
+            >
+              <p className="text-sm font-semibold text-white">{playerNameById[draft.playerId]} positionsbyte</p>
+              <p className="mt-1 text-sm text-stone-300">Välj en spelare som redan är på planen.</p>
+            </button>
           </div>
-        )}
-      </div>
+        </>
+      ) : (
+        <>
+          {draft.type === 'unavailable' ? (
+            <p className="mt-3 rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-sm text-stone-300">
+              Välj vem som ska ersätta spelaren medan den är tillfälligt ute.
+            </p>
+          ) : null}
 
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="inline-flex items-center gap-2 text-sm text-stone-300">
-          <AlertTriangle className="h-4 w-4 text-clay-200" />
-          Resten av matchen räknas om direkt efter bekräftelse.
-        </p>
-        <button
-          type="button"
-          onClick={onConfirm}
-          disabled={!draft.selectedReplacementPlayerId}
-          className="inline-flex items-center justify-center rounded-full bg-clay-400 px-4 py-2 text-sm font-semibold text-clay-900 transition hover:bg-clay-300 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Bekräfta live-byte
-        </button>
-      </div>
+          {draft.type === 'position-swap' ? (
+            <p className="mt-3 rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-3 text-sm text-stone-300">
+              Välj vem {playerNameById[draft.playerId]} ska byta position med, antingen på planen eller från bänken.
+            </p>
+          ) : null}
+
+          <div className="mt-3 space-y-2">
+            {draft.type === 'position-swap' ? (
+              draft.candidates.length > 0 ? (
+                draft.candidates.map((candidate) => (
+                  <button
+                    key={`position-swap-${draft.playerId}-${candidate.playerId}-${candidate.position}`}
+                    type="button"
+                    onClick={() => onSelectPlayer(candidate.playerId)}
+                    className={`flex w-full items-start justify-between gap-3 rounded-[0.95rem] border px-3 py-3 text-left transition ${
+                      draft.selectedTargetPlayerId === candidate.playerId
+                        ? 'border-clay-300/35 bg-clay-500/10'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-white">
+                        {playerNameById[candidate.playerId]}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-300">
+                        {candidate.position.startsWith('B')
+                          ? 'Är tillgänglig på bänken och kan komma in direkt.'
+                          : 'Är på planen nu och kan byta position direkt.'}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-stone-300">
+                      {candidate.position}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-[0.95rem] border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-sm text-amber-50">
+                  Det finns ingen annan spelare på planen att byta position med just nu.
+                </div>
+              )
+            ) : draft.recommendations.length > 0 ? (
+              draft.recommendations.map((recommendation, index) => (
+                <button
+                  key={`live-recommendation-${draft.playerId}-${recommendation.playerId}-${recommendation.position}`}
+                  type="button"
+                  onClick={() => onSelectPlayer(recommendation.playerId)}
+                  className={`flex w-full items-start justify-between gap-3 rounded-[0.95rem] border px-3 py-3 text-left transition ${
+                    draft.selectedReplacementPlayerId === recommendation.playerId
+                      ? 'border-clay-300/35 bg-clay-500/10'
+                      : 'border-white/10 bg-white/5 hover:border-white/20'
+                  }`}
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {playerNameById[recommendation.playerId]}
+                      {index === 0 ? (
+                        <span className="ml-2 rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
+                          Rek
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="mt-1 text-sm text-stone-300">{recommendation.reason}</p>
+                  </div>
+                  <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-stone-300">
+                    {recommendation.position}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <div className="rounded-[0.95rem] border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-sm text-amber-50">
+                Det finns ingen tillgänglig rekommendation just nu.
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="inline-flex items-center gap-2 text-sm text-stone-300">
+              <AlertTriangle className="h-4 w-4 text-clay-200" />
+              Resten av matchen räknas om direkt efter bekräftelse.
+            </p>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={!canConfirm}
+              className="inline-flex items-center justify-center rounded-full bg-clay-400 px-4 py-2 text-sm font-semibold text-clay-900 transition hover:bg-clay-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Bekräfta live-byte
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

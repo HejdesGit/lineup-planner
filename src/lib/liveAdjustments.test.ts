@@ -307,6 +307,193 @@ describe('liveAdjustments', () => {
     expect(getChunkAtMinute(afterReturn.plan, 2, 12)?.goalkeeperId).toBe(goalkeeperId)
   })
 
+  it('splits the active chunk for an outfield positionsbyte and keeps availability unchanged', () => {
+    const plan = createPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const leftPlayerId = chunk.lineup.VB!
+    const rightPlayerId = chunk.lineup.HB!
+
+    const next = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        playerId: leftPlayerId,
+        targetPlayerId: rightPlayerId,
+      },
+    })
+
+    const swappedChunk = getChunkAtMinute(next.plan, 2, 12)
+
+    expect(next.availability).toEqual(availability)
+    expect(next.plan.periods[1].chunks.some((candidate) => candidate.endMinute === 10)).toBe(true)
+    expect(next.plan.periods[1].chunks.some((candidate) => candidate.startMinute === 10)).toBe(true)
+    expect(swappedChunk?.lineup.VB).toBe(rightPlayerId)
+    expect(swappedChunk?.lineup.HB).toBe(leftPlayerId)
+  })
+
+  it('supports positionsbyte with the goalkeeper and swaps the active roles immediately', () => {
+    const plan = createPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const outfieldPlayerId = chunk.lineup.VB!
+    const goalkeeperId = chunk.goalkeeperId
+
+    const next = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        playerId: outfieldPlayerId,
+        targetPlayerId: goalkeeperId,
+      },
+    })
+
+    const swappedChunk = getChunkAtMinute(next.plan, 2, 12)
+
+    expect(swappedChunk?.goalkeeperId).toBe(outfieldPlayerId)
+    expect(swappedChunk?.lineup.VB).toBe(goalkeeperId)
+    expect(swappedChunk?.activePlayerIds).toContain(outfieldPlayerId)
+    expect(swappedChunk?.activePlayerIds).toContain(goalkeeperId)
+  })
+
+  it('supports positionsbyte with a bench player and brings that player onto the field', () => {
+    const plan = createPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const outfieldPlayerId = chunk.lineup.VB!
+    const benchPlayerId = plan.summaries.find(
+      (summary) =>
+        availability[summary.playerId] === 'available' &&
+        !chunk.activePlayerIds.includes(summary.playerId),
+    )?.playerId
+
+    if (!benchPlayerId) {
+      throw new Error('Saknar tillgänglig bänkspelare i testet.')
+    }
+
+    const next = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        playerId: outfieldPlayerId,
+        targetPlayerId: benchPlayerId,
+      },
+    })
+
+    const swappedChunk = getChunkAtMinute(next.plan, 2, 12)
+
+    expect(swappedChunk?.lineup.VB).toBe(benchPlayerId)
+    expect(swappedChunk?.activePlayerIds).toContain(benchPlayerId)
+    expect(swappedChunk?.activePlayerIds).not.toContain(outfieldPlayerId)
+  })
+
+  it('replays temporary-out and return events correctly after a positionsbyte', () => {
+    const plan = createPlan()
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const swappedOutfieldId = chunk.lineup.VB!
+    const swapTargetId = chunk.lineup.HB!
+    const swapEvent: LiveAdjustmentEvent = {
+      type: 'position-swap',
+      period: 2,
+      minute: 10,
+      playerId: swappedOutfieldId,
+      targetPlayerId: swapTargetId,
+    }
+
+    const afterSwap = applyLiveAdjustmentEvents({
+      plan,
+      events: [swapEvent],
+    })
+    const temporaryOutRecommendation = getLiveRecommendations({
+      plan: afterSwap.plan,
+      availability: afterSwap.availability,
+      period: 2,
+      minute: 12,
+      playerId: swappedOutfieldId,
+      type: 'temporary-out',
+    })[0]
+
+    if (!temporaryOutRecommendation) {
+      throw new Error('Saknar ersättningskandidat efter positionsbytet.')
+    }
+
+    const temporaryOutEvent: LiveAdjustmentEvent = {
+      type: 'temporary-out',
+      period: 2,
+      minute: 12,
+      playerId: swappedOutfieldId,
+      replacementPlayerId: temporaryOutRecommendation.playerId,
+      status: 'temporarily-out',
+    }
+    const afterTemporaryOut = applyLiveAdjustmentEvents({
+      plan,
+      events: [swapEvent, temporaryOutEvent],
+    })
+    const returnRecommendation = getLiveRecommendations({
+      plan: afterTemporaryOut.plan,
+      availability: afterTemporaryOut.availability,
+      period: 2,
+      minute: 14,
+      playerId: swappedOutfieldId,
+      type: 'return',
+    })[0]
+
+    if (!returnRecommendation) {
+      throw new Error('Saknar returkandidat efter positionsbytet.')
+    }
+
+    const replayed = applyLiveAdjustmentEvents({
+      plan,
+      events: [
+        swapEvent,
+        temporaryOutEvent,
+        {
+          type: 'return',
+          period: 2,
+          minute: 14,
+          playerId: swappedOutfieldId,
+          replacementPlayerId: returnRecommendation.playerId,
+        },
+      ],
+    })
+
+    expect(afterTemporaryOut.availability[swappedOutfieldId]).toBe('temporarily-out')
+    expect(getChunkAtMinute(afterTemporaryOut.plan, 2, 12)?.activePlayerIds).not.toContain(
+      swappedOutfieldId,
+    )
+    expect(replayed.availability[swappedOutfieldId]).toBe('available')
+    expect(getChunkAtMinute(replayed.plan, 2, 14)?.activePlayerIds).toContain(swappedOutfieldId)
+  })
+
   it('replays persisted live events in order', () => {
     const plan = createPlan()
     const injuryChunk = getChunkAtMinute(plan, 2, 10)

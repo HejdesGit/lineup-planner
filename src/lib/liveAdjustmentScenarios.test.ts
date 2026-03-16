@@ -9,7 +9,7 @@ describe('liveAdjustmentScenarios', () => {
   it('returns the full preset scenario set with passing hard validations', () => {
     const reports = runLiveAdjustmentScenarios()
 
-    expect(reports).toHaveLength(17)
+    expect(reports).toHaveLength(20)
     expect(reports.every((report) => report.validations.hardInvariantsPassed)).toBe(true)
     expect(reports.every((report) => report.validations.unavailableTargetsFrozen)).toBe(true)
     expect(reports.map((report) => report.id)).toEqual([
@@ -29,6 +29,9 @@ describe('liveAdjustmentScenarios', () => {
       'injury-on-replacement',
       'formation-3-2-1-mid-out',
       'short-periods-injury',
+      'position-swap-outfield',
+      'position-swap-goalkeeper',
+      'position-swap-bench',
       'empty-bench-no-options',
     ])
   })
@@ -51,6 +54,9 @@ describe('liveAdjustmentScenarios', () => {
     const replacementInjuryScenario = reports.find((report) => report.id === 'injury-on-replacement')
     const formationScenario = reports.find((report) => report.id === 'formation-3-2-1-mid-out')
     const shortPeriodsScenario = reports.find((report) => report.id === 'short-periods-injury')
+    const outfieldSwapScenario = reports.find((report) => report.id === 'position-swap-outfield')
+    const goalkeeperSwapScenario = reports.find((report) => report.id === 'position-swap-goalkeeper')
+    const benchSwapScenario = reports.find((report) => report.id === 'position-swap-bench')
     const emptyBenchScenario = reports.find((report) => report.id === 'empty-bench-no-options')
 
     expect(singleMidScenario?.eventLog[0]?.resolvedChunkWindowIndex).toBe(2)
@@ -78,6 +84,13 @@ describe('liveAdjustmentScenarios', () => {
     expect(formationScenario?.initialConfig.formation).toBe('3-2-1')
     expect(['VB', 'CB', 'HB', 'VM', 'HM', 'A']).toContain(formationScenario?.eventLog[0]?.position)
     expect(shortPeriodsScenario?.initialConfig.periodMinutes).toBe(15)
+    expect(outfieldSwapScenario?.eventLog[0]?.type).toBe('position-swap')
+    expect(outfieldSwapScenario?.eventLog[0]?.poolType).toBe('active-outfield')
+    expect(outfieldSwapScenario?.eventLog[0]?.replacementPlayerId).toBeTruthy()
+    expect(goalkeeperSwapScenario?.eventLog[0]?.poolType).toBe('active-goalkeeper')
+    expect(goalkeeperSwapScenario?.eventLog[0]?.position).toBe('MV')
+    expect(benchSwapScenario?.eventLog[0]?.poolType).toBe('bench')
+    expect(benchSwapScenario?.eventLog[0]?.position).toBe('Bench')
     expect(emptyBenchScenario?.eventLog[1]?.recommendationPoolSize).toBe(0)
     expect(emptyBenchScenario?.eventLog[1]?.eventApplied).toBe(false)
     expect(emptyBenchScenario?.eventLog[1]?.poolType).toBe('none')
@@ -89,7 +102,7 @@ describe('liveAdjustmentScenarios', () => {
     const artifacts = createLiveScenarioArtifacts('2026-03-15T12:00:00.000Z')
 
     expect(aiReport.status).toBe('prepared')
-    expect(aiReport.summary.scenarioCount).toBe(17)
+    expect(aiReport.summary.scenarioCount).toBe(20)
     expect(aiReport.scenarios.every((scenario) => scenario.assessment.status === 'prepared')).toBe(true)
 
     expect(artifacts.bundle.aiValidation.reportVersion).toBe('live-scenarios-v2')
@@ -100,6 +113,9 @@ describe('liveAdjustmentScenarios', () => {
     expect(artifacts.markdown).toContain('ej återvänd före slutsignal')
     expect(artifacts.markdown).toContain('## Single temporary-out mid period (`single-mid-period-out`)')
     expect(artifacts.markdown).toContain('## Injury at kickoff (`injury-at-kickoff`)')
+    expect(artifacts.markdown).toContain(
+      '## Position swap with goalkeeper (`position-swap-goalkeeper`)',
+    )
     expect(artifacts.markdown).toContain('## Empty bench no options (`empty-bench-no-options`)')
   })
 })

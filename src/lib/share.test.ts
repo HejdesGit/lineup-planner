@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { buildLineupShareUrl, decodeLineupSnapshot, encodeLineupSnapshot } from './share'
 import type { GeneratedConfig } from './types'
 
+function encodeBase64Url(value: string) {
+  const binary = Array.from(new TextEncoder().encode(value), (byte) => String.fromCharCode(byte)).join('')
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
 describe('share codec', () => {
   it('round-trips a compact lineup snapshot with Swedish player names', () => {
     const config: GeneratedConfig = {
@@ -45,7 +51,7 @@ describe('share codec', () => {
     expect(decoded.liveEvents).toEqual([])
   })
 
-  it('round-trips live adjustment events in v2 snapshots', () => {
+  it('round-trips live adjustment events in v3 snapshots', () => {
     const config: GeneratedConfig = {
       playerInput: 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo',
       playerNames: ['Ada', 'Bea', 'Cleo', 'Dani', 'Eli', 'Fia', 'Gio', 'Hugo'],
@@ -68,6 +74,13 @@ describe('share codec', () => {
           replacementPlayerId: 'player-8',
           status: 'temporarily-out',
         },
+        {
+          type: 'position-swap',
+          period: 2,
+          minute: 12,
+          playerId: 'player-2',
+          targetPlayerId: 'player-1',
+        },
       ],
     })
     const decoded = decodeLineupSnapshot(encoded)
@@ -81,7 +94,39 @@ describe('share codec', () => {
         replacementPlayerId: 'player-8',
         status: 'temporarily-out',
       },
+      {
+        type: 'position-swap',
+        period: 2,
+        minute: 12,
+        playerId: 'player-2',
+        targetPlayerId: 'player-1',
+      },
     ])
+  })
+
+  it('decodes legacy v2 live adjustment snapshots', () => {
+    const payload = {
+      v: 2,
+      p: ['Ada', 'Bea', 'Cleo', 'Dani', 'Eli', 'Fia', 'Gio', 'Hugo'],
+      pm: 15,
+      f: '2-3-1',
+      cm: 5,
+      gk: ['Ada', '', 'Bea'],
+      s: 999,
+      le: [
+        {
+          type: 'temporary-out',
+          period: 2,
+          minute: 10,
+          playerId: 'player-3',
+          replacementPlayerId: 'player-8',
+          status: 'temporarily-out',
+        },
+      ],
+    }
+    const encoded = encodeBase64Url(JSON.stringify(payload))
+
+    expect(decodeLineupSnapshot(encoded).liveEvents).toEqual(payload.le)
   })
 
   it('builds a share url with a single lineup query param', () => {
