@@ -2117,9 +2117,9 @@ function LivePositionBadge({
       {onMarkUnavailable ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-1 top-1 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white sm:h-10 sm:w-10"
+          className="pointer-events-none absolute -left-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/20 text-stone-300 backdrop-blur sm:-left-2.5 sm:-top-2.5 sm:h-9 sm:w-9"
         >
-          <UserMinus className="h-4 w-4 sm:h-[1.05rem] sm:w-[1.05rem]" />
+          <UserMinus className="h-3 w-3 sm:h-4 sm:w-4" />
         </span>
       ) : null}
       <div className="pointer-events-none">
