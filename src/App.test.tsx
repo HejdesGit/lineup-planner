@@ -638,6 +638,23 @@ describe('App', () => {
     })
   })
 
+  it('shows available bench cards and upcoming substitutions in the live panel', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /starta period 1/i }))
+
+    const activePeriodCard = document.querySelector('article[data-period="1"]') as HTMLElement | null
+
+    if (!activePeriodCard) {
+      throw new Error('Aktivt periodkort saknas i testet.')
+    }
+
+    expect(within(activePeriodCard).queryByText(/första reserv/i)).not.toBeInTheDocument()
+    expect(within(activePeriodCard).getByText(/tillgänglig bänk/i)).toBeInTheDocument()
+    expect(within(activePeriodCard).getByText(/nästa byten/i)).toBeInTheDocument()
+    expect(within(activePeriodCard).getByText(/nästa bänk:/i)).toBeInTheDocument()
+  })
+
   it('marks a live player as temporarily out, recommends a replacement, and can return the player immediately', async () => {
     const user = await generateCustomPlan()
 

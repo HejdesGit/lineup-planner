@@ -44,6 +44,7 @@ import {
   areBoardAssignmentsEqual,
   createBoardAssignments,
   getBoardBenchSlots,
+  getBenchSlotId,
   getBoardLineup,
   isBenchSlot,
   normalizePeriodOverrides,
@@ -596,6 +597,27 @@ function App() {
               onSelectTimerPeriod={handleSelectTimerPeriod}
             />
 
+            {liveAvailability &&
+            matchProgress &&
+            matchProgress.activePeriod !== null &&
+            matchProgress.activeChunkIndex !== null &&
+            (matchProgress.status === 'running' || matchProgress.status === 'paused') ? (
+              <LiveNowPanel
+                key={`live-period-${matchProgress.activePeriod}`}
+                plan={displayPlan}
+                period={
+                  displayPlan.periods.find((period) => period.period === matchProgress.activePeriod) ??
+                  displayPlan.periods[0]
+                }
+                availability={liveAvailability}
+                nameById={playerNameById}
+                activeMinute={roundMinuteValue(matchProgress.elapsedMs / 60_000)}
+                activeChunkIndex={matchProgress.activeChunkIndex}
+                unavailableRoleById={unavailableRoleById}
+                onApplyLiveEvent={handleApplyLiveEvent}
+              />
+            ) : null}
+
             {liveError ? (
               <section className="rounded-[1.35rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
                 {liveError}
@@ -606,29 +628,19 @@ function App() {
               {displayPlan.periods.map((period, index) => (
                 <PeriodCard
                   key={`${displayPlan.seed}-${period.period}`}
-                  plan={displayPlan}
                   period={period}
                   boardAssignments={
                     normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
                   }
-                  availability={liveAvailability ?? createInitialAvailabilityState(displayPlan)}
                   nameById={playerNameById}
                   defaultLockedSlots={
                     displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
                   }
                   isActivePeriod={matchProgress?.activePeriod === period.period}
-                  activeMinute={
-                    matchProgress?.activePeriod === period.period &&
-                    (matchProgress.status === 'running' || matchProgress.status === 'paused')
-                      ? roundMinuteValue(matchProgress.elapsedMs / 60_000)
-                      : null
-                  }
                   activeChunkIndex={
                     matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
                   }
                   periodState={getPeriodState(period.period, matchProgress)}
-                  unavailableRoleById={unavailableRoleById}
-                  onApplyLiveEvent={handleApplyLiveEvent}
                   onSwapSlots={(sourceSlot, targetSlot) => {
                     setShouldSyncShareUrl(true)
                     setLiveError(null)
@@ -907,6 +919,218 @@ function SettingsPanel({
           </div>
         ) : null}
       </div>
+    </section>
+  )
+}
+
+function LiveNowPanel({
+  plan,
+  period,
+  availability,
+  nameById,
+  activeMinute,
+  activeChunkIndex,
+  unavailableRoleById,
+  onApplyLiveEvent,
+}: {
+  plan: MatchPlan
+  period: PeriodPlan
+  availability: LiveAvailabilityState
+  nameById: Record<string, string>
+  activeMinute: number
+  activeChunkIndex: number
+  unavailableRoleById: Record<string, LiveAdjustmentRole>
+  onApplyLiveEvent: (event: {
+    playerId: string
+    replacementPlayerId: string
+    role: LiveAdjustmentRole
+    status: 'temporarily-out' | 'return'
+  }) => void
+}) {
+  const activeChunk = period.chunks[activeChunkIndex] ?? null
+  const allPlayerIds = useMemo(
+    () => plan.summaries.map((summary) => summary.playerId),
+    [plan.summaries],
+  )
+  const availableBenchPlayerIds = useMemo(() => {
+    if (!activeChunk) {
+      return []
+    }
+
+    const activePlayerIds = new Set(activeChunk.activePlayerIds)
+    return allPlayerIds.filter(
+      (playerId) => !activePlayerIds.has(playerId) && availability[playerId] === 'available',
+    )
+  }, [activeChunk, allPlayerIds, availability])
+  const nextPlannedChunk = period.chunks[activeChunkIndex + 1] ?? null
+  const unavailablePlayers = useMemo(
+    () =>
+      plan.summaries.filter((summary) => {
+        const status = availability[summary.playerId]
+        return status !== 'available'
+      }),
+    [availability, plan.summaries],
+  )
+  const [liveDraft, setLiveDraft] = useState<LiveEventDraft | null>(null)
+
+  const createUnavailableDraft = (playerId: string): LiveEventDraft => {
+    const role: LiveAdjustmentRole = activeChunk?.goalkeeperId === playerId ? 'goalkeeper' : 'outfield'
+    const recommendations = getLiveRecommendations({
+      plan,
+      availability,
+      period: period.period,
+      minute: activeMinute,
+      playerId,
+      type: 'temporary-out',
+      role,
+    })
+
+    return {
+      type: 'unavailable',
+      playerId,
+      role,
+      recommendations,
+      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
+    }
+  }
+
+  const createReturnDraft = (playerId: string): LiveEventDraft => {
+    const role = unavailableRoleById[playerId] ?? 'outfield'
+    const recommendations = getLiveRecommendations({
+      plan,
+      availability,
+      period: period.period,
+      minute: activeMinute,
+      playerId,
+      type: 'return',
+      role,
+    })
+
+    return {
+      type: 'return',
+      playerId,
+      role,
+      recommendations,
+      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
+    }
+  }
+
+  const handleConfirmLiveDraft = () => {
+    if (!liveDraft?.selectedReplacementPlayerId) {
+      return
+    }
+
+    onApplyLiveEvent({
+      playerId: liveDraft.playerId,
+      replacementPlayerId: liveDraft.selectedReplacementPlayerId,
+      role: liveDraft.role,
+      status: liveDraft.type === 'return' ? 'return' : 'temporarily-out',
+    })
+    setLiveDraft(null)
+  }
+
+  if (!activeChunk) {
+    return null
+  }
+
+  return (
+    <section className="rounded-[1.75rem] border border-clay-300/20 bg-clay-500/10 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur sm:p-5">
+      <div className="mb-3">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-clay-100/75">
+            Live just nu
+          </p>
+          <p className="mt-1 text-sm text-white">
+            Period {period.period} · {formatMinuteRangeLabel(activeChunk.startMinute, activeChunk.endMinute)} · minut{' '}
+            {formatMinuteValue(activeMinute)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <BenchBadgePanel
+          title="Tillgänglig bänk"
+          hint="Spelare som kan komma in direkt just nu."
+          playerIds={availableBenchPlayerIds}
+          nameById={nameById}
+          emptyLabel="Ingen tillgänglig bänk just nu"
+        />
+        <NextSubstitutionsPanel chunk={nextPlannedChunk} nameById={nameById} />
+      </div>
+
+      <LiveFormationBoard
+        formation={period.formation}
+        lineup={activeChunk.lineup}
+        goalkeeperId={activeChunk.goalkeeperId}
+        nameById={nameById}
+        onMarkUnavailable={(playerId) => {
+          const nextDraft = createUnavailableDraft(playerId)
+          setLiveDraft(nextDraft)
+        }}
+      />
+
+      <div className="mt-3 rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">
+              Ej tillgängliga nu
+            </p>
+            <p className="mt-1 text-sm text-stone-300">
+              Spelare som är tillfälligt ute kan sättas tillbaka direkt härifrån.
+            </p>
+          </div>
+          <p className="text-sm text-white">
+            {unavailablePlayers.length > 0 ? `${unavailablePlayers.length} spelare` : 'Ingen just nu'}
+          </p>
+        </div>
+        {unavailablePlayers.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {unavailablePlayers.map((summary) => {
+              return (
+                <button
+                  key={`unavailable-${summary.playerId}`}
+                  type="button"
+                  onClick={() => {
+                    const nextDraft = createReturnDraft(summary.playerId)
+                    setLiveDraft(nextDraft)
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white transition hover:border-clay-300/35 hover:bg-clay-500/10"
+                >
+                  <span className="inline-flex rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
+                    Tillfälligt ute
+                  </span>
+                  <span>{summary.name}</span>
+                  <span className="inline-flex items-center gap-1 text-stone-300">
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Klar för spel
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-stone-400">Alla spelare är tillgängliga.</p>
+        )}
+      </div>
+
+      {liveDraft ? (
+        <LiveAdjustmentPanel
+          draft={liveDraft}
+          playerNameById={nameById}
+          onClose={() => setLiveDraft(null)}
+          onSelectReplacement={(playerId) =>
+            setLiveDraft((current) =>
+              current
+                ? {
+                    ...current,
+                    selectedReplacementPlayerId: playerId,
+                  }
+                : current,
+            )
+          }
+          onConfirm={handleConfirmLiveDraft}
+        />
+      ) : null}
     </section>
   )
 }
@@ -1385,38 +1609,23 @@ function PlayerMinutesSection({ plan }: { plan: MatchPlan }) {
 }
 
 function PeriodCard({
-  plan,
   period,
   boardAssignments,
-  availability,
   nameById,
   onSwapSlots,
-  onApplyLiveEvent,
   defaultLockedSlots,
   isActivePeriod,
-  activeMinute,
   activeChunkIndex,
   periodState,
-  unavailableRoleById,
 }: {
-  plan: MatchPlan
   period: PeriodPlan
   boardAssignments: Record<BoardSlotId, string>
-  availability: LiveAvailabilityState
   nameById: Record<string, string>
   onSwapSlots: (sourceSlot: BoardSlotId, targetSlot: BoardSlotId) => void
-  onApplyLiveEvent: (event: {
-    playerId: string
-    replacementPlayerId: string
-    role: LiveAdjustmentRole
-    status: 'temporarily-out' | 'return'
-  }) => void
   defaultLockedSlots: BoardSlotId[]
   isActivePeriod: boolean
-  activeMinute: number | null
   activeChunkIndex: number | null
   periodState: 'upcoming' | 'active' | 'completed'
-  unavailableRoleById: Record<string, LiveAdjustmentRole>
 }) {
   const [manualLockedSlots, setManualLockedSlots] = useState<BoardSlotId[]>([])
   const [dismissedDefaultLockedSlots, setDismissedDefaultLockedSlots] = useState<BoardSlotId[]>([])
@@ -1462,84 +1671,6 @@ function PeriodCard({
     [activeSlot, boardAssignments, canPreviewSwap, overSlot],
   )
   const activePlayerName = activeSlot ? boardAssignments[activeSlot] : null
-  const activeChunk =
-    isActivePeriod && activeChunkIndex !== null ? period.chunks[activeChunkIndex] ?? null : null
-  const allPlayerIds = useMemo(
-    () => plan.summaries.map((summary) => summary.playerId),
-    [plan.summaries],
-  )
-  const availableBenchPlayerIds = useMemo(() => {
-    if (!activeChunk) {
-      return []
-    }
-
-    const activePlayerIds = new Set(activeChunk.activePlayerIds)
-    return allPlayerIds.filter(
-      (playerId) => !activePlayerIds.has(playerId) && availability[playerId] === 'available',
-    )
-  }, [activeChunk, allPlayerIds, availability])
-  const firstReserveName =
-    availableBenchPlayerIds.length > 0 ? nameById[availableBenchPlayerIds[0]] ?? '-' : 'Ingen'
-  const unavailablePlayers = useMemo(
-    () =>
-      plan.summaries.filter((summary) => {
-        const status = availability[summary.playerId]
-        return status !== 'available'
-      }),
-    [availability, plan.summaries],
-  )
-  const [liveDraftState, setLiveDraft] = useState<LiveEventDraft | null>(null)
-  const liveDraft = activeChunk && activeMinute !== null ? liveDraftState : null
-
-  const createUnavailableDraft = (playerId: string): LiveEventDraft | null => {
-    if (activeMinute === null) {
-      return null
-    }
-
-    const role: LiveAdjustmentRole = activeChunk?.goalkeeperId === playerId ? 'goalkeeper' : 'outfield'
-    const recommendations = getLiveRecommendations({
-      plan,
-      availability,
-      period: period.period,
-      minute: activeMinute,
-      playerId,
-      type: 'temporary-out',
-      role,
-    })
-
-    return {
-      type: 'unavailable',
-      playerId,
-      role,
-      recommendations,
-      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
-    }
-  }
-
-  const createReturnDraft = (playerId: string): LiveEventDraft | null => {
-    if (activeMinute === null) {
-      return null
-    }
-
-    const role = unavailableRoleById[playerId] ?? 'outfield'
-    const recommendations = getLiveRecommendations({
-      plan,
-      availability,
-      period: period.period,
-      minute: activeMinute,
-      playerId,
-      type: 'return',
-      role,
-    })
-
-    return {
-      type: 'return',
-      playerId,
-      role,
-      recommendations,
-      selectedReplacementPlayerId: recommendations[0]?.playerId ?? null,
-    }
-  }
 
   const handleToggleLock = (slotId: BoardSlotId) => {
     if (manualLockedSlots.includes(slotId)) {
@@ -1570,20 +1701,6 @@ function PeriodCard({
     }
 
     onSwapSlots(sourceSlot, targetSlot)
-  }
-
-  const handleConfirmLiveDraft = () => {
-    if (!liveDraft || !liveDraft.selectedReplacementPlayerId) {
-      return
-    }
-
-    onApplyLiveEvent({
-      playerId: liveDraft.playerId,
-      replacementPlayerId: liveDraft.selectedReplacementPlayerId,
-      role: liveDraft.role,
-      status: liveDraft.type === 'return' ? 'return' : 'temporarily-out',
-    })
-    setLiveDraft(null)
   }
 
   return (
@@ -1635,102 +1752,6 @@ function PeriodCard({
           setOverSlot(null)
         }}
       />
-
-      {activeChunk && activeMinute !== null ? (
-        <div className="mt-4 rounded-[1.2rem] border border-clay-300/20 bg-clay-500/10 p-3.5 sm:mt-5 sm:p-4">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-clay-100/75">
-                Live just nu
-              </p>
-              <p className="mt-1 text-sm text-white">
-                {formatMinuteRangeLabel(activeChunk.startMinute, activeChunk.endMinute)} · minut{' '}
-                {formatMinuteValue(activeMinute)}
-              </p>
-              <p className="mt-1 text-sm text-stone-300">Första reserv: {firstReserveName}</p>
-            </div>
-            <p className="text-sm text-stone-300">
-              Tillgänglig bänk: {availableBenchPlayerIds.length > 0
-                ? availableBenchPlayerIds.map((playerId) => nameById[playerId]).join(', ')
-                : 'Ingen'}
-            </p>
-          </div>
-
-          <LiveFormationBoard
-            formation={period.formation}
-            lineup={activeChunk.lineup}
-            goalkeeperId={activeChunk.goalkeeperId}
-            nameById={nameById}
-            onMarkUnavailable={(playerId) => {
-              const nextDraft = createUnavailableDraft(playerId)
-              setLiveDraft(nextDraft)
-            }}
-          />
-
-          <div className="mt-3 rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">
-                  Ej tillgängliga nu
-                </p>
-                <p className="mt-1 text-sm text-stone-300">
-                  Spelare som är tillfälligt ute kan sättas tillbaka direkt härifrån.
-                </p>
-              </div>
-              <p className="text-sm text-white">
-                {unavailablePlayers.length > 0 ? `${unavailablePlayers.length} spelare` : 'Ingen just nu'}
-              </p>
-            </div>
-            {unavailablePlayers.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {unavailablePlayers.map((summary) => {
-                  return (
-                    <button
-                      key={`unavailable-${summary.playerId}`}
-                      type="button"
-                      onClick={() => {
-                        const nextDraft = createReturnDraft(summary.playerId)
-                        setLiveDraft(nextDraft)
-                      }}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white transition hover:border-clay-300/35 hover:bg-clay-500/10"
-                    >
-                      <span className="inline-flex rounded-full bg-clay-400/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-clay-50">
-                        Tillfälligt ute
-                      </span>
-                      <span>{summary.name}</span>
-                      <span className="inline-flex items-center gap-1 text-stone-300">
-                        <UserPlus className="h-3.5 w-3.5" />
-                        Klar för spel
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-stone-400">Alla spelare är tillgängliga.</p>
-            )}
-          </div>
-
-          {liveDraft ? (
-            <LiveAdjustmentPanel
-              draft={liveDraft}
-              playerNameById={nameById}
-              onClose={() => setLiveDraft(null)}
-              onSelectReplacement={(playerId) =>
-                setLiveDraft((current) =>
-                  current
-                    ? {
-                        ...current,
-                        selectedReplacementPlayerId: playerId,
-                      }
-                    : current,
-                )
-              }
-              onConfirm={handleConfirmLiveDraft}
-            />
-          ) : null}
-        </div>
-      ) : null}
 
       <div className="mt-4 space-y-3 sm:mt-5">
         {period.chunks.map((chunk, chunkIndex) => {
@@ -2237,6 +2258,95 @@ function LiveAdjustmentPanel({
           Bekräfta live-byte
         </button>
       </div>
+    </div>
+  )
+}
+
+function BenchBadgePanel({
+  title,
+  hint,
+  playerIds,
+  nameById,
+  emptyLabel,
+}: {
+  title: string
+  hint?: string
+  playerIds: string[]
+  nameById: Record<string, string>
+  emptyLabel: string
+}) {
+  return (
+    <div className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3 sm:rounded-[1.2rem]">
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">{title}</p>
+        {hint ? <p className="text-[10px] text-stone-500">{hint}</p> : null}
+      </div>
+
+      {playerIds.length > 0 ? (
+        <div className="flex flex-wrap justify-center gap-2">
+          {playerIds.map((playerId, index) => (
+            <PositionBadgeCard
+              key={`${title}-${playerId}`}
+              label={getBenchSlotId(index)}
+              player={nameById[playerId] ?? '-'}
+              tone="bench"
+              locked={false}
+              dragState="idle"
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-stone-400">{emptyLabel}</p>
+      )}
+    </div>
+  )
+}
+
+function NextSubstitutionsPanel({
+  chunk,
+  nameById,
+}: {
+  chunk: PeriodPlan['chunks'][number] | null
+  nameById: Record<string, string>
+}) {
+  return (
+    <div className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-3 sm:rounded-[1.2rem]">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-stone-400">Nästa byten</p>
+          <p className="mt-1 text-sm text-stone-300">
+            {chunk
+              ? `${formatMinuteRangeLabel(chunk.startMinute, chunk.endMinute)} · Byteblock ${chunk.windowIndex + 1}`
+              : 'Inga fler planerade byten i perioden.'}
+          </p>
+        </div>
+      </div>
+
+      {chunk ? (
+        <div className="mt-3 space-y-2">
+          {chunk.substitutions.length > 0 ? (
+            chunk.substitutions.map((substitution) => (
+              <div
+                key={`next-substitution-${substitution.playerInId}-${substitution.playerOutId}-${substitution.position}`}
+                className="rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-2.5 text-sm"
+              >
+                <span className="font-semibold text-emerald-300">{nameById[substitution.playerInId]}</span>
+                <span className="text-stone-300"> in, </span>
+                <span className="font-semibold text-amber-200">{nameById[substitution.playerOutId]}</span>
+                <span className="text-stone-300"> ut ({substitution.position})</span>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-[0.95rem] border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-stone-400">
+              Inga planerade byten i nästa byteblock.
+            </p>
+          )}
+
+          <p className="text-xs text-stone-500">
+            Nästa bänk: {chunk.substitutes.length > 0 ? chunk.substitutes.join(', ') : 'Ingen'}
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }
