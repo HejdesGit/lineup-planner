@@ -1047,7 +1047,8 @@ function LiveNowPanel({
         </div>
       </div>
 
-      <div className="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <div className="mb-3 space-y-3">
+        <NextSubstitutionsPanel chunk={nextPlannedChunk} nameById={nameById} />
         <BenchBadgePanel
           title="Tillgänglig bänk"
           hint="Spelare som kan komma in direkt just nu."
@@ -1055,7 +1056,6 @@ function LiveNowPanel({
           nameById={nameById}
           emptyLabel="Ingen tillgänglig bänk just nu"
         />
-        <NextSubstitutionsPanel chunk={nextPlannedChunk} nameById={nameById} />
       </div>
 
       <LiveFormationBoard
