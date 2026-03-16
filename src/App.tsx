@@ -1478,6 +1478,8 @@ function PeriodCard({
       (playerId) => !activePlayerIds.has(playerId) && availability[playerId] === 'available',
     )
   }, [activeChunk, allPlayerIds, availability])
+  const firstReserveName =
+    availableBenchPlayerIds.length > 0 ? nameById[availableBenchPlayerIds[0]] ?? '-' : 'Ingen'
   const unavailablePlayers = useMemo(
     () =>
       plan.summaries.filter((summary) => {
@@ -1645,6 +1647,7 @@ function PeriodCard({
                 {formatMinuteRangeLabel(activeChunk.startMinute, activeChunk.endMinute)} · minut{' '}
                 {formatMinuteValue(activeMinute)}
               </p>
+              <p className="mt-1 text-sm text-stone-300">Första reserv: {firstReserveName}</p>
             </div>
             <p className="text-sm text-stone-300">
               Tillgänglig bänk: {availableBenchPlayerIds.length > 0
@@ -2108,25 +2111,38 @@ function LivePositionBadge({
     att: 'border-rose-300/35 bg-[linear-gradient(180deg,rgba(251,113,133,0.18),rgba(127,29,29,0.28))] text-rose-50',
     gk: 'border-clay-300/35 bg-[linear-gradient(180deg,rgba(251,191,36,0.18),rgba(120,53,15,0.28))] text-amber-50',
   }
-
-  return (
-    <div
-      className={`relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${toneClasses[tone]}`}
-    >
+  const badgeClasses = `relative min-w-0 flex-1 rounded-[0.95rem] border px-2.5 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${toneClasses[tone]}`
+  const badgeContent = (
+    <>
       {onMarkUnavailable ? (
-        <button
-          type="button"
-          onClick={onMarkUnavailable}
-          className="absolute left-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white transition hover:border-white/20 hover:bg-black/40 sm:h-10 sm:w-10"
-          aria-label={`Markera ${player} som tillfälligt ute`}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1 top-1 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-white sm:h-10 sm:w-10"
         >
           <UserMinus className="h-4 w-4 sm:h-[1.05rem] sm:w-[1.05rem]" />
-        </button>
+        </span>
       ) : null}
-      <p className="pointer-events-none font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
-      <p className="mt-2 text-sm font-semibold">{player}</p>
-    </div>
+      <div className="pointer-events-none">
+        <p className="font-mono text-[9px] uppercase tracking-[0.26em] opacity-80">{label}</p>
+        <p className="mt-2 text-sm font-semibold">{player}</p>
+      </div>
+    </>
   )
+
+  if (onMarkUnavailable) {
+    return (
+      <button
+        type="button"
+        onClick={onMarkUnavailable}
+        className={`${badgeClasses} cursor-pointer transition hover:border-white/20 hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30`}
+        aria-label={`Markera ${player} som tillfälligt ute`}
+      >
+        {badgeContent}
+      </button>
+    )
+  }
+
+  return <div className={badgeClasses}>{badgeContent}</div>
 }
 
 function LiveAdjustmentPanel({
