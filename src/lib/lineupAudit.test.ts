@@ -315,7 +315,7 @@ describe('createAuditRecord', () => {
     ['cross-period-return', 20260327, 2, true],
     ['position-swap-outfield', 20260401, 1, true],
     ['position-swap-goalkeeper', 20260402, 1, true],
-    ['position-swap-bench', 20260403, 1, false],
+    ['position-swap-bench', 20260403, 1, true],
   ] as const)(
     'captures live adjustment data for %s',
     (liveAdjustmentPattern, seed, expectedEventCount, expectedFairnessWithinTolerance) => {

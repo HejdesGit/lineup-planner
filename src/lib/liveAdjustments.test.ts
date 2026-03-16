@@ -411,6 +411,53 @@ describe('liveAdjustments', () => {
     expect(swappedChunk?.activePlayerIds).not.toContain(outfieldPlayerId)
   })
 
+  it('rebalances future chunks after a bench positionsbyte so the outgoing player can return later', () => {
+    const plan = createPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const outfieldPlayerId = chunk.lineup.VB!
+    const benchPlayerId = plan.summaries.find(
+      (summary) =>
+        availability[summary.playerId] === 'available' &&
+        !chunk.activePlayerIds.includes(summary.playerId),
+    )?.playerId
+
+    if (!benchPlayerId) {
+      throw new Error('Saknar tillgänglig bänkspelare i testet.')
+    }
+
+    const next = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'position-swap',
+        period: 2,
+        minute: 10,
+        playerId: outfieldPlayerId,
+        targetPlayerId: benchPlayerId,
+      },
+    })
+
+    const laterChunks = next.plan.periods
+      .flatMap((period) => period.chunks)
+      .filter((candidate) => candidate.period > 2 || candidate.startMinute >= 20)
+
+    expect(next.availability).toEqual(availability)
+    expect(laterChunks.some((candidate) => candidate.activePlayerIds.includes(outfieldPlayerId))).toBe(true)
+    expect(
+      Math.max(
+        ...next.plan.summaries.map((summary) =>
+          Math.abs(summary.totalMinutes - next.plan.fairnessTargets[summary.playerId]),
+        ),
+      ),
+    ).toBeLessThanOrEqual(next.plan.chunkMinutes + 0.05)
+  })
+
   it('replays temporary-out and return events correctly after a positionsbyte', () => {
     const plan = createPlan()
     const chunk = getChunkAtMinute(plan, 2, 10)

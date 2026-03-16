@@ -432,6 +432,32 @@ export function replanMatchFromLiveEvent({
       playerIds: allPlayerIds,
     })
 
+    if (!context.currentChunk.activePlayerIds.includes(event.targetPlayerId)) {
+      const eventRole =
+        context.currentChunk.goalkeeperId === event.playerId ? 'goalkeeper' : 'outfield'
+      const outfieldPosition =
+        eventRole === 'outfield'
+          ? findOutfieldPosition(context.currentChunk.lineup, event.playerId) ?? undefined
+          : undefined
+
+      if (eventRole === 'outfield' && !outfieldPosition) {
+        throw new Error('Spelaren är inte aktiv som utespelare i det här byteblocket.')
+      }
+
+      return replanMatchFromForcedSubstitution({
+        plan,
+        context,
+        periodIndex,
+        nameById,
+        allPlayerIds,
+        nextAvailability: availability,
+        eventRole,
+        activePlayerId: event.playerId,
+        incomingPlayerId: event.targetPlayerId,
+        outfieldPosition,
+      })
+    }
+
     const periods: PeriodPlan[] = [...context.prefixPeriods]
     const currentPeriodChunks = [...context.currentPeriodPrefixChunks]
 
@@ -543,9 +569,6 @@ export function replanMatchFromLiveEvent({
     throw new Error('Spelaren är redan tillgänglig.')
   }
 
-  const playerOrderById = Object.fromEntries(
-    allPlayerIds.map((playerId, index) => [playerId, index]),
-  ) as Record<string, number>
   const adjustedGoalkeepers = resolveAdjustedGoalkeepers({
     plan,
     availability: nextAvailability,
@@ -563,10 +586,61 @@ export function replanMatchFromLiveEvent({
     currentChunk: context.currentChunk,
     playerIds: allPlayerIds,
   })
+  return replanMatchFromForcedSubstitution({
+    plan,
+    context,
+    periodIndex,
+    nameById,
+    allPlayerIds,
+    nextAvailability,
+    eventRole,
+    activePlayerId: event.type === 'return' ? event.replacementPlayerId : event.playerId,
+    incomingPlayerId: event.type === 'return' ? event.playerId : event.replacementPlayerId,
+    outfieldPosition,
+  })
+}
+
+function replanMatchFromForcedSubstitution({
+  plan,
+  context,
+  periodIndex,
+  nameById,
+  allPlayerIds,
+  nextAvailability,
+  eventRole,
+  activePlayerId,
+  incomingPlayerId,
+  outfieldPosition,
+}: {
+  plan: MatchPlan
+  context: EventContext
+  periodIndex: number
+  nameById: Record<string, string>
+  allPlayerIds: string[]
+  nextAvailability: LiveAvailabilityState
+  eventRole: LiveAdjustmentRole
+  activePlayerId: string
+  incomingPlayerId: string
+  outfieldPosition?: OutfieldPosition
+}) {
+  const playerOrderById = Object.fromEntries(
+    allPlayerIds.map((playerId, index) => [playerId, index]),
+  ) as Record<string, number>
+  const adjustedGoalkeepers = resolveAdjustedGoalkeepers({
+    plan,
+    availability: nextAvailability,
+    currentPeriodIndex: periodIndex,
+    playerIds: allPlayerIds,
+  })
+
+  if (eventRole === 'goalkeeper') {
+    adjustedGoalkeepers[periodIndex] = incomingPlayerId
+  }
 
   const periods: PeriodPlan[] = [...context.prefixPeriods]
   const currentPeriodChunks = [...context.currentPeriodPrefixChunks]
   let currentPeriodStarted = context.hasStartedCurrentPeriod
+  const currentRemainderDuration = roundMinuteValue(context.currentChunk.endMinute - context.eventMinute)
 
   if (currentRemainderDuration > ROUNDING_EPSILON) {
     const forcedLineup: Lineup =
@@ -574,33 +648,8 @@ export function replanMatchFromLiveEvent({
         ? context.currentChunk.lineup
         : {
             ...context.currentChunk.lineup,
-            [outfieldPosition as OutfieldPosition]:
-              event.type === 'return' ? event.playerId : event.replacementPlayerId,
+            [outfieldPosition as OutfieldPosition]: incomingPlayerId,
           }
-    const substitution: ChunkSubstitution =
-      eventRole === 'goalkeeper'
-        ? event.type === 'return'
-          ? {
-              playerInId: event.playerId,
-              playerOutId: event.replacementPlayerId,
-              position: 'MV',
-            }
-          : {
-              playerInId: event.replacementPlayerId,
-              playerOutId: event.playerId,
-              position: 'MV',
-            }
-        : event.type === 'return'
-          ? {
-              playerInId: event.playerId,
-              playerOutId: event.replacementPlayerId,
-              position: outfieldPosition as OutfieldPosition,
-            }
-          : {
-              playerInId: event.replacementPlayerId,
-              playerOutId: event.playerId,
-              position: outfieldPosition as OutfieldPosition,
-            }
     const remainderChunk = createChunk({
       template: {
         chunkIndex: context.currentChunk.chunkIndex,
@@ -611,16 +660,17 @@ export function replanMatchFromLiveEvent({
         durationMinutes: currentRemainderDuration,
       },
       lineup: forcedLineup,
-      goalkeeperId:
-        eventRole === 'goalkeeper'
-          ? event.type === 'return'
-            ? event.playerId
-            : event.replacementPlayerId
-          : context.currentChunk.goalkeeperId,
+      goalkeeperId: eventRole === 'goalkeeper' ? incomingPlayerId : context.currentChunk.goalkeeperId,
       allPlayerIds,
       nameById,
       availability: nextAvailability,
-      substitutions: [substitution],
+      substitutions: [
+        {
+          playerInId: incomingPlayerId,
+          playerOutId: activePlayerId,
+          position: eventRole === 'goalkeeper' ? 'MV' : (outfieldPosition as OutfieldPosition),
+        } satisfies ChunkSubstitution,
+      ],
     })
 
     currentPeriodChunks.push(remainderChunk)
@@ -693,7 +743,7 @@ export function replanMatchFromLiveEvent({
 
   periods.push(
     buildPeriodPlan({
-      periodNumber: event.period,
+      periodNumber: periodIndex + 1,
       formation: plan.formation,
       positions: plan.positions,
       goalkeeperId: adjustedGoalkeepers[periodIndex],
@@ -732,13 +782,13 @@ export function replanMatchFromLiveEvent({
 
     periods.push(
       buildPeriodPlan({
-          periodNumber: nextPeriodIndex + 1,
-          formation: plan.formation,
-          positions: plan.positions,
-          goalkeeperId: adjustedGoalkeepers[nextPeriodIndex],
-          chunks,
-          nameById,
-        }),
+        periodNumber: nextPeriodIndex + 1,
+        formation: plan.formation,
+        positions: plan.positions,
+        goalkeeperId: adjustedGoalkeepers[nextPeriodIndex],
+        chunks,
+        nameById,
+      }),
     )
   }
 

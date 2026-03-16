@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-03-16T22:14:02.484Z",
+  "scenarioCount": 3,
+  "exportCount": 15,
+  "flaggedExportCount": 2,
+  "validationFailureCount": 2,
+  "byDimension": {
+    "playerCount": {
+      "10": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "periodMinutes": {
+      "20": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "formation": {
+      "2-3-1": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "substitutionsPerPeriod": {
+      "2": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "goalkeeperMode": {
+      "auto": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "rosterOrder": {
+      "canonical": {
+        "scenarioCount": 3,
+        "exportCount": 15,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 1644.427,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    },
+    "liveAdjustmentPattern": {
+      "position-swap-outfield": {
+        "scenarioCount": 1,
+        "exportCount": 5,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1475.12,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": []
+      },
+      "position-swap-goalkeeper": {
+        "scenarioCount": 1,
+        "exportCount": 5,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1375.52,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": []
+      },
+      "position-swap-bench": {
+        "scenarioCount": 1,
+        "exportCount": 5,
+        "flaggedExportCount": 2,
+        "validationFailureCount": 2,
+        "averageNormalizedScore": 2082.64,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "maxBenchSpread": 10,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ]
+      }
+    }
+  },
+  "topFlaggedScenarios": [
+    {
+      "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench",
+      "manifestPath": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/manifest.json",
+      "flaggedSeedCount": 2,
+      "validationFailureCount": 2,
+      "maxMinuteSpread": 10,
+      "uniqueFlags": [
+        "consecutive-bench"
+      ]
+    }
+  ]
+}

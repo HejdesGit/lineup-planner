@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-03-16T22:14:02.484Z",
+  "outDir": "docs/generated-lineups-position-swap",
+  "scenarioCount": 3,
+  "exportCount": 15,
+  "filters": {
+    "playerCounts": [
+      10
+    ],
+    "periodMinutes": [
+      20
+    ],
+    "formations": [
+      "2-3-1"
+    ],
+    "substitutions": [
+      2
+    ],
+    "goalkeeperModes": [
+      "auto"
+    ],
+    "rosterOrders": [
+      "canonical"
+    ],
+    "livePatterns": [
+      "position-swap-outfield",
+      "position-swap-goalkeeper",
+      "position-swap-bench"
+    ],
+    "seeds": [
+      1,
+      7,
+      19,
+      42,
+      99
+    ],
+    "clean": true
+  },
+  "scenarios": [
+    {
+      "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield",
+      "config": {
+        "playerCount": 10,
+        "periodMinutes": 20,
+        "formation": "2-3-1",
+        "substitutionsPerPeriod": 2,
+        "chunkMinutes": 10,
+        "goalkeeperMode": "auto",
+        "rosterOrder": "canonical",
+        "liveAdjustmentPattern": "position-swap-outfield"
+      },
+      "manifestPath": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/manifest.json",
+      "seedFiles": [
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/seed-1.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/seed-7.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/seed-19.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/seed-42.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-outfield/seed-99.json"
+      ],
+      "aggregate": {
+        "seedCount": 5,
+        "flaggedSeedCount": 0,
+        "validationFailureCount": 0,
+        "uniqueFlags": [],
+        "averageNormalizedScore": 1475.12,
+        "averageLegacyScore": 1840.6,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "averageBenchSpread": 10,
+        "maxBenchSpread": 10
+      }
+    },
+    {
+      "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper",
+      "config": {
+        "playerCount": 10,
+        "periodMinutes": 20,
+        "formation": "2-3-1",
+        "substitutionsPerPeriod": 2,
+        "chunkMinutes": 10,
+        "goalkeeperMode": "auto",
+        "rosterOrder": "canonical",
+        "liveAdjustmentPattern": "position-swap-goalkeeper"
+      },
+      "manifestPath": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/manifest.json",
+      "seedFiles": [
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/seed-1.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/seed-7.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/seed-19.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/seed-42.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-goalkeeper/seed-99.json"
+      ],
+      "aggregate": {
+        "seedCount": 5,
+        "flaggedSeedCount": 0,
+        "validationFailureCount": 0,
+        "uniqueFlags": [],
+        "averageNormalizedScore": 1375.52,
+        "averageLegacyScore": 1642.8,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "averageBenchSpread": 10,
+        "maxBenchSpread": 10
+      }
+    },
+    {
+      "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench",
+      "config": {
+        "playerCount": 10,
+        "periodMinutes": 20,
+        "formation": "2-3-1",
+        "substitutionsPerPeriod": 2,
+        "chunkMinutes": 10,
+        "goalkeeperMode": "auto",
+        "rosterOrder": "canonical",
+        "liveAdjustmentPattern": "position-swap-bench"
+      },
+      "manifestPath": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/manifest.json",
+      "seedFiles": [
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-1.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-7.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-19.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-42.json",
+        "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-99.json"
+      ],
+      "aggregate": {
+        "seedCount": 5,
+        "flaggedSeedCount": 2,
+        "validationFailureCount": 2,
+        "uniqueFlags": [
+          "consecutive-bench"
+        ],
+        "averageNormalizedScore": 2082.64,
+        "averageLegacyScore": 2260.1,
+        "averageMinuteSpread": 10,
+        "maxMinuteSpread": 10,
+        "averageBenchSpread": 10,
+        "maxBenchSpread": 10
+      }
+    }
+  ]
+}
