@@ -314,6 +314,21 @@
                 "playerInId": "p-1",
                 "playerOutId": "p-5",
                 "position": "VB"
+              },
+              {
+                "playerInId": "p-6",
+                "playerOutId": "p-1",
+                "position": "HB"
+              },
+              {
+                "playerInId": "p-7",
+                "playerOutId": "p-3",
+                "position": "HM"
+              },
+              {
+                "playerInId": "p-10",
+                "playerOutId": "p-4",
+                "position": "A"
               }
             ]
           }

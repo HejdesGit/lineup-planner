@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-03-16T22:14:02.484Z",
+  "generatedAt": "2026-03-17T06:14:41.784Z",
   "outDir": "docs/generated-lineups-position-swap",
   "scenarioCount": 3,
   "exportCount": 15,
@@ -126,13 +126,11 @@
       ],
       "aggregate": {
         "seedCount": 5,
-        "flaggedSeedCount": 2,
-        "validationFailureCount": 2,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ],
-        "averageNormalizedScore": 2082.64,
-        "averageLegacyScore": 2260.1,
+        "flaggedSeedCount": 0,
+        "validationFailureCount": 0,
+        "uniqueFlags": [],
+        "averageNormalizedScore": 1289.08,
+        "averageLegacyScore": 1600.2,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "averageBenchSpread": 10,

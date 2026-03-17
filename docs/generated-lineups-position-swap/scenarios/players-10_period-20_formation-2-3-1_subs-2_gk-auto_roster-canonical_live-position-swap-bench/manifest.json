@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-03-16T22:14:02.484Z",
+  "generatedAt": "2026-03-17T06:14:41.784Z",
   "scenario": {
     "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench",
     "playerCount": 10,
@@ -26,13 +26,11 @@
   },
   "aggregate": {
     "seedCount": 5,
-    "flaggedSeedCount": 2,
-    "validationFailureCount": 2,
-    "uniqueFlags": [
-      "consecutive-bench"
-    ],
-    "averageNormalizedScore": 2082.64,
-    "averageLegacyScore": 2260.1,
+    "flaggedSeedCount": 0,
+    "validationFailureCount": 0,
+    "uniqueFlags": [],
+    "averageNormalizedScore": 1289.08,
+    "averageLegacyScore": 1600.2,
     "averageMinuteSpread": 10,
     "maxMinuteSpread": 10,
     "averageBenchSpread": 10,
@@ -82,17 +80,15 @@
         "normalizedScoreMatchesPlan": true,
         "allPassed": true
       },
-      "normalizedScore": 1119.4,
-      "legacyScore": 1417.5,
+      "normalizedScore": 1123,
+      "legacyScore": 1420.5,
       "totalMinuteSpread": 10,
       "benchMinuteSpread": 10
     },
     {
       "seed": 19,
       "file": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-19.json",
-      "flags": [
-        "consecutive-bench"
-      ],
+      "flags": [],
       "validations": {
         "totalMinutesMatchExpected": true,
         "benchMinutesMatchExpected": true,
@@ -101,24 +97,22 @@
         "lockedGoalkeepersRespected": true,
         "summaryMinutesConsistent": true,
         "uniqueGoalkeepersPerPeriod": true,
-        "noConsecutiveBenchWindows": false,
+        "noConsecutiveBenchWindows": true,
         "noUnavailableLeaks": true,
         "liveFairnessWithinTolerance": true,
         "livePatternCompleted": true,
         "normalizedScoreMatchesPlan": true,
-        "allPassed": false
+        "allPassed": true
       },
-      "normalizedScore": 3381.4,
-      "legacyScore": 3367,
+      "normalizedScore": 1353.4,
+      "legacyScore": 1677,
       "totalMinuteSpread": 10,
       "benchMinuteSpread": 10
     },
     {
       "seed": 42,
       "file": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/seed-42.json",
-      "flags": [
-        "consecutive-bench"
-      ],
+      "flags": [],
       "validations": {
         "totalMinutesMatchExpected": true,
         "benchMinutesMatchExpected": true,
@@ -127,15 +121,15 @@
         "lockedGoalkeepersRespected": true,
         "summaryMinutesConsistent": true,
         "uniqueGoalkeepersPerPeriod": true,
-        "noConsecutiveBenchWindows": false,
+        "noConsecutiveBenchWindows": true,
         "noUnavailableLeaks": true,
         "liveFairnessWithinTolerance": true,
         "livePatternCompleted": true,
         "normalizedScoreMatchesPlan": true,
-        "allPassed": false
+        "allPassed": true
       },
-      "normalizedScore": 3340.6,
-      "legacyScore": 3331.5,
+      "normalizedScore": 1397.2,
+      "legacyScore": 1719,
       "totalMinuteSpread": 10,
       "benchMinuteSpread": 10
     },

@@ -62,7 +62,7 @@
   },
   "plan": {
     "seed": 443471,
-    "score": 1119.4,
+    "score": 1123,
     "formation": "2-3-1",
     "chunkMinutes": 10,
     "periodMinutes": 20,
@@ -104,8 +104,8 @@
       "p-5": 41.25,
       "p-6": 41.25,
       "p-7": 41.25,
-      "p-8": 40.625,
-      "p-9": 41.25,
+      "p-8": 41.25,
+      "p-9": 40.625,
       "p-10": 41.25
     },
     "periods": [
@@ -289,24 +289,24 @@
             "goalkeeperName": "Emil",
             "lineup": {
               "VB": "p-1",
+              "HB": "p-8",
               "VM": "p-2",
-              "A": "p-9",
-              "HB": "p-5",
-              "CM": "p-6",
-              "HM": "p-3"
+              "CM": "p-3",
+              "HM": "p-6",
+              "A": "p-5"
             },
             "activePlayerIds": [
               "p-7",
               "p-1",
+              "p-8",
               "p-2",
-              "p-9",
-              "p-5",
+              "p-3",
               "p-6",
-              "p-3"
+              "p-5"
             ],
             "substitutes": [
               "Dante",
-              "Gunnar",
+              "Henry",
               "Jax"
             ],
             "substitutions": [
@@ -314,6 +314,21 @@
                 "playerInId": "p-1",
                 "playerOutId": "p-4",
                 "position": "VB"
+              },
+              {
+                "playerInId": "p-3",
+                "playerOutId": "p-1",
+                "position": "CM"
+              },
+              {
+                "playerInId": "p-5",
+                "playerOutId": "p-9",
+                "position": "A"
+              },
+              {
+                "playerInId": "p-6",
+                "playerOutId": "p-10",
+                "position": "HM"
               }
             ]
           }
@@ -323,7 +338,7 @@
           "David",
           "Elias",
           "Dante",
-          "Gunnar",
+          "Henry",
           "Jax"
         ]
       },
@@ -341,12 +356,12 @@
         "goalkeeperId": "p-1",
         "goalkeeperName": "Adam",
         "startingLineup": {
-          "VB": "p-10",
-          "HB": "p-5",
-          "VM": "p-8",
+          "VB": "p-9",
+          "HB": "p-10",
+          "VM": "p-4",
           "CM": "p-3",
           "HM": "p-6",
-          "A": "p-4"
+          "A": "p-5"
         },
         "chunks": [
           {
@@ -359,26 +374,26 @@
             "goalkeeperId": "p-1",
             "goalkeeperName": "Adam",
             "lineup": {
-              "VB": "p-10",
-              "HB": "p-5",
-              "VM": "p-8",
+              "VB": "p-9",
+              "HB": "p-10",
+              "VM": "p-4",
               "CM": "p-3",
               "HM": "p-6",
-              "A": "p-4"
+              "A": "p-5"
             },
             "activePlayerIds": [
               "p-1",
+              "p-9",
               "p-10",
-              "p-5",
-              "p-8",
+              "p-4",
               "p-3",
               "p-6",
-              "p-4"
+              "p-5"
             ],
             "substitutes": [
               "Anton",
               "Emil",
-              "Henry"
+              "Gunnar"
             ],
             "substitutions": []
           },
@@ -392,21 +407,21 @@
             "goalkeeperId": "p-1",
             "goalkeeperName": "Adam",
             "lineup": {
-              "VM": "p-8",
+              "VB": "p-9",
+              "VM": "p-4",
               "CM": "p-3",
-              "A": "p-4",
-              "VB": "p-2",
               "HB": "p-7",
-              "HM": "p-9"
+              "HM": "p-8",
+              "A": "p-2"
             },
             "activePlayerIds": [
               "p-1",
-              "p-8",
-              "p-3",
+              "p-9",
               "p-4",
-              "p-2",
+              "p-3",
               "p-7",
-              "p-9"
+              "p-8",
+              "p-2"
             ],
             "substitutes": [
               "David",
@@ -416,16 +431,16 @@
             "substitutions": [
               {
                 "playerInId": "p-2",
-                "playerOutId": "p-10",
-                "position": "VB"
+                "playerOutId": "p-5",
+                "position": "A"
               },
               {
                 "playerInId": "p-7",
-                "playerOutId": "p-5",
+                "playerOutId": "p-10",
                 "position": "HB"
               },
               {
-                "playerInId": "p-9",
+                "playerInId": "p-8",
                 "playerOutId": "p-6",
                 "position": "HM"
               }
@@ -435,7 +450,7 @@
         "substitutes": [
           "Anton",
           "Emil",
-          "Henry",
+          "Gunnar",
           "David",
           "Elias",
           "Jax"
@@ -471,11 +486,11 @@
         "positionsPlayed": [
           "CM",
           "VM",
-          "VB"
+          "A"
         ],
         "roleGroups": [
-          "DEF",
-          "MID"
+          "MID",
+          "ATT"
         ]
       },
       {
@@ -486,7 +501,6 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "HB",
-          "HM",
           "CM"
         ],
         "roleGroups": [
@@ -503,12 +517,11 @@
         "positionsPlayed": [
           "CM",
           "VB",
-          "A"
+          "VM"
         ],
         "roleGroups": [
           "DEF",
-          "MID",
-          "ATT"
+          "MID"
         ]
       },
       {
@@ -519,11 +532,11 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "VM",
-          "HB"
+          "A"
         ],
         "roleGroups": [
-          "DEF",
-          "MID"
+          "MID",
+          "ATT"
         ]
       },
       {
@@ -534,7 +547,6 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "VB",
-          "CM",
           "HM"
         ],
         "roleGroups": [
@@ -568,7 +580,7 @@
         "positionsPlayed": [
           "A",
           "HB",
-          "VM"
+          "HM"
         ],
         "roleGroups": [
           "DEF",
@@ -584,9 +596,11 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "HM",
-          "A"
+          "A",
+          "VB"
         ],
         "roleGroups": [
+          "DEF",
           "MID",
           "ATT"
         ]
@@ -601,7 +615,7 @@
         ],
         "positionsPlayed": [
           "HM",
-          "VB"
+          "HB"
         ],
         "roleGroups": [
           "DEF",
@@ -618,7 +632,7 @@
         "targetPenalty": 17.5,
         "minuteSpreadPenalty": 10,
         "benchSpreadPenalty": 10,
-        "repeatPenalty": 109.5,
+        "repeatPenalty": 112.5,
         "periodStartPenalty": 180,
         "consecutiveBenchPenalty": 0,
         "fragmentedMinutesPenalty": 420,
@@ -629,14 +643,14 @@
         "targetPenalty": 315,
         "minuteSpreadPenalty": 80,
         "benchSpreadPenalty": 80,
-        "repeatPenalty": 131.39999999999998,
+        "repeatPenalty": 135,
         "periodStartPenalty": 180,
         "consecutiveBenchPenalty": 0,
         "fragmentedMinutesPenalty": 126,
         "groupBreadthPenalty": 99,
         "periodStartVariationPenalty": 108
       },
-      "totalScore": 1119.4
+      "totalScore": 1123
     },
     "legacy": {
       "profile": "legacy",
@@ -645,7 +659,7 @@
         "targetPenalty": 17.5,
         "minuteSpreadPenalty": 10,
         "benchSpreadPenalty": 10,
-        "repeatPenalty": 109.5,
+        "repeatPenalty": 112.5,
         "periodStartPenalty": 180,
         "consecutiveBenchPenalty": 0,
         "fragmentedMinutesPenalty": 420,
@@ -656,14 +670,14 @@
         "targetPenalty": 350,
         "minuteSpreadPenalty": 80,
         "benchSpreadPenalty": 80,
-        "repeatPenalty": 109.5,
+        "repeatPenalty": 112.5,
         "periodStartPenalty": 180,
         "consecutiveBenchPenalty": 0,
         "fragmentedMinutesPenalty": 420,
         "groupBreadthPenalty": 90,
         "periodStartVariationPenalty": 108
       },
-      "totalScore": 1417.5
+      "totalScore": 1420.5
     }
   },
   "derivedMetrics": {
@@ -728,11 +742,11 @@
         "positionsPlayed": [
           "CM",
           "VM",
-          "VB"
+          "A"
         ],
         "roleGroups": [
-          "DEF",
-          "MID"
+          "MID",
+          "ATT"
         ],
         "isolatedPlayBlocks": 1,
         "longestPlayStreakWindows": 3,
@@ -759,7 +773,6 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "HB",
-          "HM",
           "CM"
         ],
         "roleGroups": [
@@ -792,12 +805,11 @@
         "positionsPlayed": [
           "CM",
           "VB",
-          "A"
+          "VM"
         ],
         "roleGroups": [
           "DEF",
-          "MID",
-          "ATT"
+          "MID"
         ],
         "isolatedPlayBlocks": 2,
         "longestPlayStreakWindows": 2,
@@ -824,11 +836,11 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "VM",
-          "HB"
+          "A"
         ],
         "roleGroups": [
-          "DEF",
-          "MID"
+          "MID",
+          "ATT"
         ],
         "isolatedPlayBlocks": 0,
         "longestPlayStreakWindows": 2,
@@ -855,7 +867,6 @@
         "goalkeeperPeriods": [],
         "positionsPlayed": [
           "VB",
-          "CM",
           "HM"
         ],
         "roleGroups": [
@@ -921,7 +932,40 @@
         "positionsPlayed": [
           "A",
           "HB",
-          "VM"
+          "HM"
+        ],
+        "roleGroups": [
+          "DEF",
+          "MID",
+          "ATT"
+        ],
+        "isolatedPlayBlocks": 2,
+        "longestPlayStreakWindows": 2,
+        "longestPlayStreakMinutes": 20,
+        "longestBenchStreakWindows": 1,
+        "longestBenchStreakMinutes": 10,
+        "consecutiveBenchWindowCount": 0,
+        "chunkStates": [
+          "P",
+          "B",
+          "P",
+          "P",
+          "B",
+          "P"
+        ]
+      },
+      {
+        "playerId": "p-9",
+        "name": "Henry",
+        "totalMinutes": 40,
+        "benchMinutes": 20,
+        "goalkeeperMinutes": 0,
+        "outfieldMinutes": 40,
+        "goalkeeperPeriods": [],
+        "positionsPlayed": [
+          "HM",
+          "A",
+          "VB"
         ],
         "roleGroups": [
           "DEF",
@@ -944,37 +988,6 @@
         ]
       },
       {
-        "playerId": "p-9",
-        "name": "Henry",
-        "totalMinutes": 40,
-        "benchMinutes": 20,
-        "goalkeeperMinutes": 0,
-        "outfieldMinutes": 40,
-        "goalkeeperPeriods": [],
-        "positionsPlayed": [
-          "HM",
-          "A"
-        ],
-        "roleGroups": [
-          "MID",
-          "ATT"
-        ],
-        "isolatedPlayBlocks": 2,
-        "longestPlayStreakWindows": 2,
-        "longestPlayStreakMinutes": 20,
-        "longestBenchStreakWindows": 1,
-        "longestBenchStreakMinutes": 10,
-        "consecutiveBenchWindowCount": 0,
-        "chunkStates": [
-          "P",
-          "B",
-          "P",
-          "P",
-          "B",
-          "P"
-        ]
-      },
-      {
         "playerId": "p-10",
         "name": "Jax",
         "totalMinutes": 40,
@@ -986,7 +999,7 @@
         ],
         "positionsPlayed": [
           "HM",
-          "VB"
+          "HB"
         ],
         "roleGroups": [
           "DEF",

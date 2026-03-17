@@ -1,99 +1,87 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-03-16T22:14:02.484Z",
+  "generatedAt": "2026-03-17T06:14:41.784Z",
   "scenarioCount": 3,
   "exportCount": 15,
-  "flaggedExportCount": 2,
-  "validationFailureCount": 2,
+  "flaggedExportCount": 0,
+  "validationFailureCount": 0,
   "byDimension": {
     "playerCount": {
       "10": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "periodMinutes": {
       "20": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "formation": {
       "2-3-1": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "substitutionsPerPeriod": {
       "2": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "goalkeeperMode": {
       "auto": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "rosterOrder": {
       "canonical": {
         "scenarioCount": 3,
         "exportCount": 15,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 1644.427,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1379.907,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     },
     "liveAdjustmentPattern": {
@@ -122,28 +110,15 @@
       "position-swap-bench": {
         "scenarioCount": 1,
         "exportCount": 5,
-        "flaggedExportCount": 2,
-        "validationFailureCount": 2,
-        "averageNormalizedScore": 2082.64,
+        "flaggedExportCount": 0,
+        "validationFailureCount": 0,
+        "averageNormalizedScore": 1289.08,
         "averageMinuteSpread": 10,
         "maxMinuteSpread": 10,
         "maxBenchSpread": 10,
-        "uniqueFlags": [
-          "consecutive-bench"
-        ]
+        "uniqueFlags": []
       }
     }
   },
-  "topFlaggedScenarios": [
-    {
-      "scenarioId": "players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench",
-      "manifestPath": "scenarios/players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-position-swap-bench/manifest.json",
-      "flaggedSeedCount": 2,
-      "validationFailureCount": 2,
-      "maxMinuteSpread": 10,
-      "uniqueFlags": [
-        "consecutive-bench"
-      ]
-    }
-  ]
+  "topFlaggedScenarios": []
 }

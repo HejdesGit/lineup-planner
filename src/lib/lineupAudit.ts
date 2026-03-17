@@ -794,6 +794,9 @@ type LivePatternTarget =
     type: 'first-active-outfielder'
   }
   | {
+    type: 'first-continuing-active-outfielder'
+  }
+  | {
     type: 'second-active-outfielder'
   }
   | {
@@ -1131,7 +1134,7 @@ function getLivePatternSteps(
           type: 'position-swap',
           period: 2,
           minute: 10,
-          target: { type: 'first-active-outfielder' },
+          target: { type: 'first-continuing-active-outfielder' },
           swapTarget: { type: 'first-available-bench-player' },
         },
       ]
@@ -1175,6 +1178,8 @@ function resolveLivePatternTargetPlayerId(
   switch (target.type) {
     case 'first-active-outfielder':
       return getOutfieldPlayerIdByIndex(chunk, plan, 0)
+    case 'first-continuing-active-outfielder':
+      return getContinuingOutfieldPlayerId(chunk, plan, step.period, step.minute)
     case 'second-active-outfielder':
       return getOutfieldPlayerIdByIndex(chunk, plan, 1)
     case 'active-goalkeeper':
@@ -1214,6 +1219,28 @@ function getOutfieldPlayerIdByIndex(
   }
 
   throw new Error('Hittade inte tillräckligt många aktiva utespelare i byteblocket.')
+}
+
+function getContinuingOutfieldPlayerId(
+  chunk: MatchPlan['periods'][number]['chunks'][number],
+  plan: MatchPlan,
+  period: number,
+  minute: number,
+) {
+  const resolved = resolveLivePatternChunkAtMinute(plan, period, minute)
+  const previousChunk =
+    resolved && resolved.chunkIndex > 0 ? plan.periods[period - 1]?.chunks[resolved.chunkIndex - 1] : null
+  const previousActivePlayerIds = new Set(previousChunk?.activePlayerIds ?? [])
+
+  for (const position of plan.positions) {
+    const playerId = chunk.lineup[position]
+
+    if (playerId && previousActivePlayerIds.has(playerId)) {
+      return playerId
+    }
+  }
+
+  return getOutfieldPlayerIdByIndex(chunk, plan, 0)
 }
 
 function getFirstAvailableBenchPlayerId(

@@ -83,6 +83,9 @@ type ScenarioTarget =
     type: 'first-active-outfielder'
   }
   | {
+    type: 'first-continuing-active-outfielder'
+  }
+  | {
     type: 'second-active-outfielder'
   }
   | {
@@ -791,7 +794,7 @@ const SCENARIO_PRESETS: ScenarioPreset[] = [
         type: 'position-swap',
         period: 2,
         minute: 10,
-        target: { type: 'first-active-outfielder' },
+        target: { type: 'first-continuing-active-outfielder' },
         swapTarget: { type: 'first-available-bench-player' },
       },
     ],
@@ -1329,6 +1332,8 @@ function resolveScenarioTargetPlayerId(
   switch (target.type) {
     case 'first-active-outfielder':
       return getOutfieldPlayerIdByIndex(chunk, state.plan, 0)
+    case 'first-continuing-active-outfielder':
+      return getContinuingOutfieldPlayerId(state, step.period, step.minute, chunk)
     case 'second-active-outfielder':
       return getOutfieldPlayerIdByIndex(chunk, state.plan, 1)
     case 'active-goalkeeper':
@@ -1703,6 +1708,28 @@ function getOutfieldPlayerIdByIndex(chunk: ChunkPlan, plan: MatchPlan, targetInd
   }
 
   throw new Error('Hittade inte tillräckligt många aktiva utespelare i byteblocket.')
+}
+
+function getContinuingOutfieldPlayerId(
+  state: ScenarioState,
+  period: number,
+  minute: number,
+  chunk: ChunkPlan,
+) {
+  const resolved = resolveScenarioChunkAtMinute(state.plan, period, minute)
+  const previousChunk =
+    resolved && resolved.chunkIndex > 0 ? state.plan.periods[period - 1]?.chunks[resolved.chunkIndex - 1] : null
+  const previousActivePlayerIds = new Set(previousChunk?.activePlayerIds ?? [])
+
+  for (const position of state.plan.positions) {
+    const playerId = chunk.lineup[position]
+
+    if (playerId && previousActivePlayerIds.has(playerId)) {
+      return playerId
+    }
+  }
+
+  return getOutfieldPlayerIdByIndex(chunk, state.plan, 0)
 }
 
 function getFirstAvailableBenchPlayerId(chunk: ChunkPlan, state: ScenarioState) {
