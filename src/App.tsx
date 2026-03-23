@@ -132,6 +132,11 @@ const DEFAULT_SHARE_SEED = 20260314
 const DEFAULT_SELECTED_TIMER_PERIOD = 1
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
 const SUBSTITUTIONS_PER_PERIOD_OPTIONS = [2, 3, 4] as const
+const BOTTOM_TAB_ITEMS = [
+  { id: 'pre-match', label: 'Inför match', sectionId: 'section-pre-match' },
+  { id: 'match-mode', label: 'Matchläge', sectionId: 'section-match-mode' },
+  { id: 'minutes', label: 'Speltid', sectionId: 'section-minutes' },
+] as const
 const SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES = {
   15: {
     2: 7.5,
@@ -187,6 +192,8 @@ interface PositionSwapCandidate {
   playerId: string
   position: string
 }
+
+type BottomTabId = (typeof BOTTOM_TAB_ITEMS)[number]['id']
 
 type LiveEventDraft =
   | {
@@ -259,6 +266,9 @@ function App() {
   )
   const [timerNow, setTimerNow] = useState(() => Date.now())
   const [liveError, setLiveError] = useState<string | null>(null)
+  const [activeBottomTab, setActiveBottomTab] = useState<BottomTabId>('pre-match')
+  const pendingBottomTabRef = useRef<BottomTabId | null>(null)
+  const pendingBottomTabUntilRef = useRef<number>(0)
 
   const rosterNames = useMemo(() => getRosterNames(formState.playerInput), [formState.playerInput])
   const playerOptions = rosterNames
@@ -327,9 +337,93 @@ function App() {
         : null,
     [activeMatchTimer, matchTimeline, timerNow],
   )
+  const hasGeneratedPlan = Boolean(displayPlan && plan)
   const showFloatingMatchTimer = Boolean(matchProgress && matchTimeline && matchProgress.status !== 'idle')
   const canSelectTimerPeriod =
     Boolean(plan) && matchProgress?.status !== 'running' && matchProgress?.status !== 'paused'
+
+  useEffect(() => {
+    if (hasGeneratedPlan) {
+      return
+    }
+
+    setActiveBottomTab('pre-match')
+  }, [hasGeneratedPlan])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    let frameId: number | null = null
+
+    const updateActiveTabFromScroll = () => {
+      const tabsWithSections = BOTTOM_TAB_ITEMS.filter(
+        (tab) => hasGeneratedPlan || tab.id === 'pre-match',
+      )
+        .map((tab) => ({
+          id: tab.id,
+          element: document.getElementById(tab.sectionId),
+        }))
+        .filter((tab): tab is { id: BottomTabId; element: HTMLElement } => tab.element !== null)
+
+      if (!tabsWithSections.length) {
+        return
+      }
+
+      const triggerY = window.innerHeight * 0.32
+      const pendingBottomTab = pendingBottomTabRef.current
+
+      if (pendingBottomTab && window.performance.now() < pendingBottomTabUntilRef.current) {
+        const pendingTarget = tabsWithSections.find((tab) => tab.id === pendingBottomTab)
+
+        if (pendingTarget) {
+          const distanceToTargetTop = Math.abs(pendingTarget.element.getBoundingClientRect().top)
+
+          if (distanceToTargetTop > 12) {
+            setActiveBottomTab((currentTab) => (currentTab === pendingBottomTab ? currentTab : pendingBottomTab))
+            return
+          }
+        }
+      }
+
+      pendingBottomTabRef.current = null
+      pendingBottomTabUntilRef.current = 0
+      let nextTabId = tabsWithSections[0].id
+
+      for (const tab of tabsWithSections) {
+        if (tab.element.getBoundingClientRect().top <= triggerY) {
+          nextTabId = tab.id
+        }
+      }
+
+      setActiveBottomTab((currentTab) => (currentTab === nextTabId ? currentTab : nextTabId))
+    }
+
+    const queueActiveTabUpdate = () => {
+      if (frameId !== null) {
+        return
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null
+        updateActiveTabFromScroll()
+      })
+    }
+
+    queueActiveTabUpdate()
+    window.addEventListener('scroll', queueActiveTabUpdate, { passive: true })
+    window.addEventListener('resize', queueActiveTabUpdate)
+
+    return () => {
+      window.removeEventListener('scroll', queueActiveTabUpdate)
+      window.removeEventListener('resize', queueActiveTabUpdate)
+
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [hasGeneratedPlan])
 
   useEffect(() => {
     if (!plan || !shouldSyncShareUrl) {
@@ -594,124 +688,157 @@ function App() {
     }
   }
 
+  const handleSelectBottomTab = (tabId: BottomTabId) => {
+    const tab = BOTTOM_TAB_ITEMS.find((item) => item.id === tabId)
+
+    if (!tab) {
+      return
+    }
+
+    if (!hasGeneratedPlan && tab.id !== 'pre-match') {
+      return
+    }
+
+    pendingBottomTabRef.current = tabId
+    pendingBottomTabUntilRef.current = window.performance.now() + 1200
+    setActiveBottomTab(tabId)
+    document.getElementById(tab.sectionId)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }
+
   return (
     <main className="relative min-h-screen overflow-hidden text-stone-100">
       <div
         className={`mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-3 py-4 sm:gap-8 sm:px-6 sm:py-6 lg:px-8 ${
-          showFloatingMatchTimer ? 'pb-40 lg:pb-6' : ''
+          showFloatingMatchTimer ? 'pb-52 sm:pb-56 lg:pb-10' : 'pb-28 sm:pb-32 lg:pb-10'
         }`}
       >
-        <header className="grid gap-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-board backdrop-blur sm:rounded-[2rem] sm:gap-6 sm:p-6 md:grid-cols-[1.1fr_0.9fr]">
-          <HeroPanel />
-          <SettingsPanel
-            state={formState}
-            dispatch={dispatch}
-            playerOptions={playerOptions}
-            rosterCount={rosterNames.length}
-            isPending={isPending}
-            canShare={Boolean(plan)}
-            onGenerate={handleGenerate}
-            onShareViaWhatsApp={handleShareViaWhatsApp}
-          />
-        </header>
+        <section id="section-pre-match" className="scroll-mt-4">
+          <header className="grid gap-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-board backdrop-blur sm:rounded-[2rem] sm:gap-6 sm:p-6 md:grid-cols-[1.1fr_0.9fr]">
+            <HeroPanel />
+            <SettingsPanel
+              state={formState}
+              dispatch={dispatch}
+              playerOptions={playerOptions}
+              rosterCount={rosterNames.length}
+              isPending={isPending}
+              canShare={Boolean(plan)}
+              onGenerate={handleGenerate}
+              onShareViaWhatsApp={handleShareViaWhatsApp}
+            />
+          </header>
+        </section>
+
+        <section id="section-match-mode" className="scroll-mt-4 space-y-5">
+          {displayPlan && plan ? (
+            <>
+              <MatchOverview
+                plan={displayPlan}
+                playerNameById={playerNameById}
+                matchProgress={matchProgress}
+                matchTimeline={matchTimeline}
+                selectedTimerPeriod={selectedTimerPeriod}
+                canSelectTimerPeriod={canSelectTimerPeriod}
+                onStartMatch={handleStartMatch}
+                onPauseMatch={handlePauseMatch}
+                onResumeMatch={handleResumeMatch}
+                onResetMatch={handleResetMatchTimer}
+                onSelectTimerPeriod={handleSelectTimerPeriod}
+              />
+
+              {liveAvailability &&
+              matchProgress &&
+              matchProgress.activePeriod !== null &&
+              matchProgress.activeChunkIndex !== null &&
+              (matchProgress.status === 'running' || matchProgress.status === 'paused') ? (
+                <LiveNowPanel
+                  key={`live-period-${matchProgress.activePeriod}`}
+                  plan={displayPlan}
+                  period={
+                    displayPlan.periods.find((period) => period.period === matchProgress.activePeriod) ??
+                    displayPlan.periods[0]
+                  }
+                  availability={liveAvailability}
+                  nameById={playerNameById}
+                  activeMinute={roundMinuteValue(matchProgress.elapsedMs / 60_000)}
+                  activeChunkIndex={matchProgress.activeChunkIndex}
+                  unavailableRoleById={unavailableRoleById}
+                  onApplyLiveEvent={handleApplyLiveEvent}
+                />
+              ) : null}
+
+              {liveError ? (
+                <section className="rounded-[1.35rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
+                  {liveError}
+                </section>
+              ) : null}
+
+              <section className="grid gap-5 xl:grid-cols-3">
+                {displayPlan.periods.map((period, index) => (
+                  <PeriodCard
+                    key={`${displayPlan.seed}-${period.period}`}
+                    period={period}
+                    boardAssignments={
+                      normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
+                    }
+                    nameById={playerNameById}
+                    defaultLockedSlots={
+                      displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
+                    }
+                    isActivePeriod={matchProgress?.activePeriod === period.period}
+                    activeChunkIndex={
+                      matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
+                    }
+                    periodState={getPeriodState(period.period, matchProgress)}
+                    onSwapSlots={(sourceSlot, targetSlot) => {
+                      setShouldSyncShareUrl(true)
+                      setLiveError(null)
+                      setPeriodOverrides((current) => {
+                        const currentAssignments =
+                          normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
+
+                        return {
+                          ...current,
+                          [period.period]: swapBoardAssignments(
+                            currentAssignments,
+                            sourceSlot,
+                            targetSlot,
+                          ),
+                        }
+                      })
+                    }}
+                  />
+                ))}
+              </section>
+
+              {showFloatingMatchTimer ? (
+                <FloatingMatchTimer
+                  matchProgress={matchProgress!}
+                  matchTimeline={matchTimeline!}
+                  onScrollToActiveSection={scrollToActiveMatchSection}
+                />
+              ) : null}
+            </>
+          ) : (
+            <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-8 text-center text-stone-300">
+              Fyll i minst 8 unika spelare för att skapa ett matchschema.
+            </section>
+          )}
+        </section>
 
         {displayPlan && plan ? (
-          <>
-            <MatchOverview
-              plan={displayPlan}
-              playerNameById={playerNameById}
-              matchProgress={matchProgress}
-              matchTimeline={matchTimeline}
-              selectedTimerPeriod={selectedTimerPeriod}
-              canSelectTimerPeriod={canSelectTimerPeriod}
-              onStartMatch={handleStartMatch}
-              onPauseMatch={handlePauseMatch}
-              onResumeMatch={handleResumeMatch}
-              onResetMatch={handleResetMatchTimer}
-              onSelectTimerPeriod={handleSelectTimerPeriod}
-            />
-
-            {liveAvailability &&
-            matchProgress &&
-            matchProgress.activePeriod !== null &&
-            matchProgress.activeChunkIndex !== null &&
-            (matchProgress.status === 'running' || matchProgress.status === 'paused') ? (
-              <LiveNowPanel
-                key={`live-period-${matchProgress.activePeriod}`}
-                plan={displayPlan}
-                period={
-                  displayPlan.periods.find((period) => period.period === matchProgress.activePeriod) ??
-                  displayPlan.periods[0]
-                }
-                availability={liveAvailability}
-                nameById={playerNameById}
-                activeMinute={roundMinuteValue(matchProgress.elapsedMs / 60_000)}
-                activeChunkIndex={matchProgress.activeChunkIndex}
-                unavailableRoleById={unavailableRoleById}
-                onApplyLiveEvent={handleApplyLiveEvent}
-              />
-            ) : null}
-
-            {liveError ? (
-              <section className="rounded-[1.35rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
-                {liveError}
-              </section>
-            ) : null}
-
-            <section className="grid gap-5 xl:grid-cols-3">
-              {displayPlan.periods.map((period, index) => (
-                <PeriodCard
-                  key={`${displayPlan.seed}-${period.period}`}
-                  period={period}
-                  boardAssignments={
-                    normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
-                  }
-                  nameById={playerNameById}
-                  defaultLockedSlots={
-                    displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
-                  }
-                  isActivePeriod={matchProgress?.activePeriod === period.period}
-                  activeChunkIndex={
-                    matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
-                  }
-                  periodState={getPeriodState(period.period, matchProgress)}
-                  onSwapSlots={(sourceSlot, targetSlot) => {
-                    setShouldSyncShareUrl(true)
-                    setLiveError(null)
-                    setPeriodOverrides((current) => {
-                      const currentAssignments =
-                        normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
-
-                      return {
-                        ...current,
-                        [period.period]: swapBoardAssignments(
-                          currentAssignments,
-                          sourceSlot,
-                          targetSlot,
-                        ),
-                      }
-                    })
-                  }}
-                />
-              ))}
-            </section>
-
+          <section id="section-minutes" className="scroll-mt-4">
             <PlayerMinutesSection plan={displayPlan} />
-
-            {showFloatingMatchTimer ? (
-              <FloatingMatchTimer
-                matchProgress={matchProgress!}
-                matchTimeline={matchTimeline!}
-                onScrollToActiveSection={scrollToActiveMatchSection}
-              />
-            ) : null}
-          </>
-        ) : (
-          <section className="rounded-[1.75rem] border border-white/10 bg-black/20 p-8 text-center text-stone-300">
-            Fyll i minst 8 unika spelare för att skapa ett matchschema.
           </section>
-        )}
+        ) : null}
       </div>
+      <BottomTabBar
+        activeTab={activeBottomTab}
+        hasGeneratedPlan={hasGeneratedPlan}
+        onSelectTab={handleSelectBottomTab}
+      />
     </main>
   )
 
@@ -1470,7 +1597,7 @@ function FloatingMatchTimer({
   const canScrollToActiveSection = Boolean(getActiveChunkAnchorId(matchProgress))
 
   return (
-    <aside className="pointer-events-none fixed inset-x-3 bottom-3 z-40 lg:inset-x-auto lg:right-4 lg:top-4 lg:bottom-auto">
+    <aside className="pointer-events-none fixed inset-x-3 bottom-24 z-40 sm:bottom-28 lg:inset-x-auto lg:right-4 lg:top-4 lg:bottom-auto">
       <div className="pointer-events-auto rounded-[1.35rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,24,13,0.94),rgba(12,18,10,0.96))] px-4 py-3 shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur lg:min-w-[18rem]">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -1516,6 +1643,47 @@ function FloatingMatchTimer({
         </p>
       </div>
     </aside>
+  )
+}
+
+function BottomTabBar({
+  activeTab,
+  hasGeneratedPlan,
+  onSelectTab,
+}: {
+  activeTab: BottomTabId
+  hasGeneratedPlan: boolean
+  onSelectTab: (tabId: BottomTabId) => void
+}) {
+  return (
+    <nav
+      aria-label="Bottennavigation"
+      className="pointer-events-none fixed inset-x-3 bottom-3 z-30 sm:bottom-4"
+    >
+      <div className="pointer-events-auto mx-auto flex w-full max-w-xl items-center gap-2 rounded-[1.6rem] border border-white/10 bg-[linear-gradient(180deg,rgba(8,24,13,0.94),rgba(12,18,10,0.98))] p-2 shadow-[0_24px_60px_rgba(0,0,0,0.32)] backdrop-blur">
+        {BOTTOM_TAB_ITEMS.map((tab) => {
+          const isActive = tab.id === activeTab
+          const isDisabled = !hasGeneratedPlan && tab.id !== 'pre-match'
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              aria-pressed={isActive}
+              disabled={isDisabled}
+              onClick={() => onSelectTab(tab.id)}
+              className={`flex min-w-0 flex-1 items-center justify-center rounded-[1.15rem] px-3 py-3 text-center transition ${
+                isActive
+                  ? 'bg-clay-400 text-clay-950 shadow-[0_10px_30px_rgba(212,125,51,0.3)]'
+                  : 'bg-white/[0.03] text-stone-200 hover:bg-white/[0.08]'
+              } ${isDisabled ? 'cursor-not-allowed opacity-45 hover:bg-white/[0.03]' : ''}`}
+            >
+              <span className="truncate font-display text-sm font-bold sm:text-base">{tab.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </nav>
   )
 }
 
