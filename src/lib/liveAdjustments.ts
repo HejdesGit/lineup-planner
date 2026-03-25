@@ -1225,12 +1225,25 @@ function buildAvailabilityAdjustedTargets({
   const futureGoalkeeperMinutes = Object.fromEntries(
     playerIds.map((playerId) => [playerId, 0]),
   ) as Record<string, number>
+  const futureEligibleOutfieldMinutes = Object.fromEntries(
+    playerIds.map((playerId) => [playerId, 0]),
+  ) as Record<string, number>
 
   let futureTotalPlayerMinutes = 0
 
   for (const template of futureTemplates) {
     futureTotalPlayerMinutes += template.durationMinutes * activePlayerCount
-    futureGoalkeeperMinutes[goalkeepers[template.periodIndex]] += template.durationMinutes
+    for (const playerId of playerIds) {
+      if (availability[playerId] !== 'available') {
+        continue
+      }
+
+      if (goalkeepers[template.periodIndex] === playerId) {
+        futureGoalkeeperMinutes[playerId] += template.durationMinutes
+      } else {
+        futureEligibleOutfieldMinutes[playerId] += template.durationMinutes
+      }
+    }
   }
 
   const availablePlayerIds = playerIds.filter((playerId) => availability[playerId] === 'available')
@@ -1239,34 +1252,76 @@ function buildAvailabilityAdjustedTargets({
     0,
   )
   const distributableMinutes = Math.max(0, futureTotalPlayerMinutes - mandatoryTotal)
-  const baseNeeds = Object.fromEntries(
+  const desiredOutfieldMinutes = Object.fromEntries(
     availablePlayerIds.map((playerId) => [
       playerId,
-      Math.max(
-        0,
-        originalTargets[playerId] - histories[playerId].actualMinutes - futureGoalkeeperMinutes[playerId],
+      Math.min(
+        Math.max(
+          0,
+          originalTargets[playerId] - histories[playerId].actualMinutes - futureGoalkeeperMinutes[playerId],
+        ),
+        futureEligibleOutfieldMinutes[playerId],
       ),
     ]),
   ) as Record<string, number>
-  const totalBaseNeed = availablePlayerIds.reduce((total, playerId) => total + baseNeeds[playerId], 0)
+  const allocatedOutfieldMinutes = Object.fromEntries(
+    availablePlayerIds.map((playerId) => [playerId, 0]),
+  ) as Record<string, number>
+  const totalDesiredOutfieldMinutes = availablePlayerIds.reduce(
+    (total, playerId) => total + desiredOutfieldMinutes[playerId],
+    0,
+  )
 
   for (const playerId of availablePlayerIds) {
     adjustedTargets[playerId] += futureGoalkeeperMinutes[playerId]
   }
 
   if (availablePlayerIds.length > 0 && distributableMinutes > ROUNDING_EPSILON) {
-    if (totalBaseNeed > distributableMinutes + ROUNDING_EPSILON) {
-      const scale = distributableMinutes / totalBaseNeed
+    if (totalDesiredOutfieldMinutes > distributableMinutes + ROUNDING_EPSILON) {
+      const scale = distributableMinutes / totalDesiredOutfieldMinutes
 
       for (const playerId of availablePlayerIds) {
-        adjustedTargets[playerId] += baseNeeds[playerId] * scale
+        allocatedOutfieldMinutes[playerId] = desiredOutfieldMinutes[playerId] * scale
       }
     } else {
-      const equalSurplus = (distributableMinutes - totalBaseNeed) / availablePlayerIds.length
-
       for (const playerId of availablePlayerIds) {
-        adjustedTargets[playerId] += baseNeeds[playerId] + equalSurplus
+        allocatedOutfieldMinutes[playerId] = desiredOutfieldMinutes[playerId]
       }
+
+      let remainingPool = distributableMinutes - totalDesiredOutfieldMinutes
+      let playersWithHeadroom = availablePlayerIds.filter(
+        (playerId) =>
+          futureEligibleOutfieldMinutes[playerId] - allocatedOutfieldMinutes[playerId] >
+          ROUNDING_EPSILON,
+      )
+
+      while (remainingPool > ROUNDING_EPSILON && playersWithHeadroom.length > 0) {
+        const equalShare = remainingPool / playersWithHeadroom.length
+        let consumedThisRound = 0
+
+        for (const playerId of playersWithHeadroom) {
+          const headroom =
+            futureEligibleOutfieldMinutes[playerId] - allocatedOutfieldMinutes[playerId]
+          const addition = Math.min(equalShare, headroom)
+          allocatedOutfieldMinutes[playerId] += addition
+          consumedThisRound += addition
+        }
+
+        if (consumedThisRound <= ROUNDING_EPSILON) {
+          break
+        }
+
+        remainingPool -= consumedThisRound
+        playersWithHeadroom = playersWithHeadroom.filter(
+          (playerId) =>
+            futureEligibleOutfieldMinutes[playerId] - allocatedOutfieldMinutes[playerId] >
+            ROUNDING_EPSILON,
+        )
+      }
+    }
+
+    for (const playerId of availablePlayerIds) {
+      adjustedTargets[playerId] += allocatedOutfieldMinutes[playerId]
     }
   }
 

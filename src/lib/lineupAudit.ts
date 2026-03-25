@@ -521,8 +521,19 @@ export function analyzeMatchPlan(
   const totalMinutes = plan.summaries.map((summary) => summary.totalMinutes)
   const benchMinutes = plan.summaries.map((summary) => summary.benchMinutes)
   const trailingChunkMinutes = plan.periodMinutes % chunkMinutes || chunkMinutes
-  const maxAllowedMinuteSpread = roundAuditValue(
+  const baselineMinuteSpreadLimit = roundAuditValue(
     playerCount === 12 ? chunkMinutes + trailingChunkMinutes : chunkMinutes,
+  )
+  const theoreticalSinglePeriodSpreadFloor =
+    periodCount === 1
+      ? getSinglePeriodGoalkeeperSpreadFloor({
+          playerCount,
+          substitutionsPerPeriod,
+          chunkMinutes,
+        })
+      : 0
+  const maxAllowedMinuteSpread = roundAuditValue(
+    Math.max(baselineMinuteSpreadLimit, theoreticalSinglePeriodSpreadFloor),
   )
   const playerMetrics = plan.summaries.map((summary) => buildPlayerAuditMetrics(summary, allChunks))
   const playersWithConsecutiveBenchWindows = playerMetrics
@@ -612,6 +623,22 @@ export function analyzeMatchPlan(
       allPassed: false,
     } satisfies AuditValidations,
   }
+}
+
+function getSinglePeriodGoalkeeperSpreadFloor({
+  playerCount,
+  substitutionsPerPeriod,
+  chunkMinutes,
+}: {
+  playerCount: number
+  substitutionsPerPeriod: SubstitutionsPerPeriod
+  chunkMinutes: number
+}) {
+  const outfieldPlayers = Math.max(playerCount - 1, 1)
+  const totalOutfieldChunkSlots = substitutionsPerPeriod * 6
+  const minimumOutfieldChunksPerPlayer = Math.floor(totalOutfieldChunkSlots / outfieldPlayers)
+
+  return roundAuditValue(Math.max(substitutionsPerPeriod - minimumOutfieldChunksPerPlayer, 0) * chunkMinutes)
 }
 
 function getConsecutiveBenchAllowance(playerCount: number) {

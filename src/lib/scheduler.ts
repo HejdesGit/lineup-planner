@@ -27,6 +27,11 @@ interface RotationSnapshot {
 }
 
 type RotationPhase = 'period-start' | 'in-period'
+type SchedulingMode = 'single-period' | 'short-multi-period' | 'extended-multi-period' | 'default'
+
+interface SchedulingPolicy {
+  mode: SchedulingMode
+}
 
 interface MatchChunk {
   chunkIndex: number
@@ -370,6 +375,11 @@ function buildCandidatePlan(
   const rng = createRng(seed)
   const positions = FORMATION_PRESETS[formation].positions
   const matchChunks = buildMatchChunks(periodCount, periodMinutes, chunkMinutes)
+  const policy = resolveSchedulingPolicy({
+    periodCount,
+    chunkCount: matchChunks.length,
+    benchSlots: Math.max(players.length - 7, 0),
+  })
   const totalPlayerMinutes = periodCount * periodMinutes * 7
   const playerIds = players.map((player) => player.id)
   const playerOrderById = Object.fromEntries(playerIds.map((id, index) => [id, index])) as Record<
@@ -418,6 +428,7 @@ function buildCandidatePlan(
         remainingEligibleByPlayer,
         positions,
         phase,
+        policy,
         rng,
       })
 
@@ -729,6 +740,7 @@ function selectOutfieldPlayers({
   remainingEligibleByPlayer,
   positions,
   phase,
+  policy,
   rng,
 }: {
   chunk: MatchChunk
@@ -739,6 +751,7 @@ function selectOutfieldPlayers({
   remainingEligibleByPlayer: Record<string, number[]>
   positions: readonly OutfieldPosition[]
   phase: RotationPhase
+  policy: SchedulingPolicy
   rng: () => number
 }) {
   if (phase === 'period-start') {
@@ -750,6 +763,7 @@ function selectOutfieldPlayers({
       outfieldTargets,
       remainingEligibleByPlayer,
       positions,
+      policy,
       rng,
     })
   }
@@ -762,6 +776,7 @@ function selectOutfieldPlayers({
     outfieldTargets,
     remainingEligibleByPlayer,
     positions,
+    policy,
     rng,
   })
 }
@@ -774,6 +789,7 @@ function selectPeriodStarters({
   outfieldTargets,
   remainingEligibleByPlayer,
   positions,
+  policy,
   rng,
 }: {
   chunk: MatchChunk
@@ -783,6 +799,7 @@ function selectPeriodStarters({
   outfieldTargets: Record<string, number>
   remainingEligibleByPlayer: Record<string, number[]>
   positions: readonly OutfieldPosition[]
+  policy: SchedulingPolicy
   rng: () => number
 }) {
   const candidates: Array<{ playerId: string; score: number }> = []
@@ -814,7 +831,13 @@ function selectPeriodStarters({
     candidates.push({ playerId, score })
   }
 
-  return selectPlayersWithBenchProtection(candidates, histories, positions.length, playerIds.length)
+  return selectPlayersWithBenchProtection(
+    candidates,
+    histories,
+    positions.length,
+    playerIds.length,
+    policy,
+  )
 }
 
 function selectInPeriodPlayers({
@@ -825,6 +848,7 @@ function selectInPeriodPlayers({
   outfieldTargets,
   remainingEligibleByPlayer,
   positions,
+  policy,
   rng,
 }: {
   chunk: MatchChunk
@@ -834,6 +858,7 @@ function selectInPeriodPlayers({
   outfieldTargets: Record<string, number>
   remainingEligibleByPlayer: Record<string, number[]>
   positions: readonly OutfieldPosition[]
+  policy: SchedulingPolicy
   rng: () => number
 }) {
   const candidates: Array<{ playerId: string; score: number }> = []
@@ -850,7 +875,25 @@ function selectInPeriodPlayers({
     const criticalGap = Math.max(remainingNeed - futureAfterCurrent, 0)
     const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
     const shortWindowSinglePlayProtection =
-      playerIds.length <= 10 && chunk.durationMinutes <= 5 && history.playStreak === 1 ? 110 : 0
+      policy.mode === 'short-multi-period' && chunk.durationMinutes <= 5 && history.playStreak === 1
+        ? 110
+        : 0
+    const largeRosterBenchRecoveryBoost =
+      policy.mode === 'extended-multi-period' &&
+      playerIds.length >= 11 &&
+      history.benchStreak > 0 &&
+      history.consecutiveBenchViolations > 0
+        ? chunk.durationMinutes <= 5
+          ? 140
+          : 175
+        : 0
+    const tripleBenchProtection =
+      policy.mode === 'short-multi-period' &&
+      playerIds.length >= 11 &&
+      chunk.durationMinutes <= 5 &&
+      history.benchStreak >= 2
+        ? 420
+        : 0
     const score =
       criticalGap * 100 +
       Math.max(remainingNeed, 0) * 12 +
@@ -858,13 +901,21 @@ function selectInPeriodPlayers({
       history.benchStreak * 120 -
       history.actualMinutes * 0.55 +
       shortWindowSinglePlayProtection +
+      largeRosterBenchRecoveryBoost +
+      tripleBenchProtection +
       Math.min(history.playStreak, 2) * 20 +
       rng() * 0.01
 
     candidates.push({ playerId, score })
   }
 
-  return selectPlayersWithBenchProtection(candidates, histories, positions.length, playerIds.length)
+  return selectPlayersWithBenchProtection(
+    candidates,
+    histories,
+    positions.length,
+    playerIds.length,
+    policy,
+  )
 }
 
 function selectPlayersWithBenchProtection(
@@ -872,10 +923,25 @@ function selectPlayersWithBenchProtection(
   histories: Record<string, PlayerHistory>,
   requiredCount: number,
   playerCount: number,
+  policy: SchedulingPolicy,
 ) {
   candidates.sort((left, right) => right.score - left.score)
 
   if (playerCount >= 11) {
+    if (policy.mode === 'short-multi-period') {
+      const mandatory = candidates.filter((candidate) => histories[candidate.playerId].benchStreak >= 2)
+      const optional = candidates.filter((candidate) => histories[candidate.playerId].benchStreak < 2)
+
+      if (mandatory.length > 0) {
+        return [
+          ...mandatory.slice(0, requiredCount).map((candidate) => candidate.playerId),
+          ...optional
+            .slice(0, Math.max(requiredCount - mandatory.length, 0))
+            .map((candidate) => candidate.playerId),
+        ]
+      }
+    }
+
     const selected = candidates.slice(0, requiredCount).map((candidate) => candidate.playerId)
     return selected.length === requiredCount ? selected : null
   }
@@ -1024,6 +1090,33 @@ function buildRotationSnapshot(history: PlayerHistory, phase: RotationPhase): Ro
     groupsPlayed: [...history.groupsPlayed],
     positionsPlayed: [...history.positionsPlayed],
   }
+}
+
+function resolveSchedulingPolicy({
+  periodCount,
+  chunkCount,
+  benchSlots,
+}: {
+  periodCount: number
+  chunkCount: number
+  benchSlots: number
+}): SchedulingPolicy {
+  if (periodCount === 1) {
+    return { mode: 'single-period' }
+  }
+
+  if (
+    (periodCount === 2 && chunkCount <= 8 && benchSlots >= 3) ||
+    (periodCount === 3 && chunkCount >= 12 && benchSlots <= 3)
+  ) {
+    return { mode: 'short-multi-period' }
+  }
+
+  if (periodCount >= 4 && benchSlots >= 3) {
+    return { mode: 'extended-multi-period' }
+  }
+
+  return { mode: 'default' }
 }
 
 function updatePeriodStartHistory(

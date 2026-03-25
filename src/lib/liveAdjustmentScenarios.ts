@@ -1385,7 +1385,10 @@ function applyScenarioStep(state: ScenarioState, step: ScenarioStep): AppliedSce
           period: step.period,
           playerId: targetPlayerId,
           playerName: playerNameById[targetPlayerId],
-          poolType: step.type === 'return' ? 'active-outfield' : 'bench',
+          poolType:
+            step.type === 'return'
+              ? getSwapPoolType(currentChunk, selectedRecommendation.playerId)
+              : 'bench',
           position: selectedRecommendation.position,
           recommendationPoolSize: recommendations.length,
           recommendationRank: 1,
@@ -1769,7 +1772,7 @@ function isReplacementFromExpectedPool(
 ) {
   return type === 'injury' || type === 'temporary-out'
     ? !chunk.activePlayerIds.includes(replacementPlayerId)
-    : Object.values(chunk.lineup).includes(replacementPlayerId)
+    : chunk.goalkeeperId === replacementPlayerId || Object.values(chunk.lineup).includes(replacementPlayerId)
 }
 
 function isSwapFromExpectedPool(_chunk: ChunkPlan, _targetPlayerId: string) {

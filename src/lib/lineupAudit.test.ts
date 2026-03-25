@@ -142,6 +142,31 @@ describe('analyzeMatchPlan', () => {
     expect(analysis.validations.benchSpreadWithinLimit).toBe(true)
   })
 
+  it('uses the theoretical one-period goalkeeper floor when chunk granularity makes tighter fairness impossible', () => {
+    const players = createNamedPlayers(11)
+    const chunkMinutes = getChunkMinutesForSubstitutions(20, 3)
+    const plan = generateMatchPlan({
+      players,
+      periodCount: 1,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes,
+      lockedGoalkeeperIds: [null],
+      seed: 1,
+    })
+    const analysis = analyzeMatchPlan(plan, {
+      playerCount: 11,
+      chunkMinutes,
+      lockedGoalkeeperIds: [null],
+    })
+
+    expect(analysis.derivedMetrics.totalMinuteSpread).toBe(13.333)
+    expect(analysis.derivedMetrics.benchMinuteSpread).toBe(13.333)
+    expect(analysis.derivedMetrics.maxAllowedMinuteSpread).toBe(13.333)
+    expect(analysis.validations.minuteSpreadWithinLimit).toBe(true)
+    expect(analysis.validations.benchSpreadWithinLimit).toBe(true)
+  })
+
   it('treats the new 11-player double-bench baseline as acceptable in audit validation', () => {
     const players = createNamedPlayers(11)
     const plan = generateMatchPlan({
@@ -191,6 +216,30 @@ describe('createAuditRecord', () => {
     expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(3)
     expect(record.derivedMetrics.playersWithExcessIsolatedPlayBlocks).toEqual([])
     expect(record.flags).not.toContain('isolated-play-blocks')
+  })
+
+  it('does not hard-flag one-period goalkeeper-driven spread when the theoretical floor exceeds one chunk', () => {
+    const record = createAuditRecord(
+      {
+        scenarioId:
+          'players-11_periods-1_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none',
+        playerCount: 11,
+        periodCount: 1,
+        periodMinutes: 20,
+        formation: '2-3-1',
+        substitutionsPerPeriod: 3,
+        chunkMinutes: getChunkMinutesForSubstitutions(20, 3),
+        goalkeeperMode: 'auto',
+        rosterOrder: 'canonical',
+        rosterNames: [],
+        liveAdjustmentPattern: 'none',
+      },
+      1,
+    )
+
+    expect(record.derivedMetrics.maxAllowedMinuteSpread).toBe(13.333)
+    expect(record.flags).not.toContain('minute-spread-over-limit')
+    expect(record.flags).not.toContain('bench-spread-over-limit')
   })
 
   it('does not flag the 9-player high-rotation case after the short-window continuity rebalance', () => {
