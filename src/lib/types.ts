@@ -1,4 +1,6 @@
 export const PERIOD_COUNT = 3
+export const PERIOD_COUNT_OPTIONS = [1, 2, 3, 4] as const
+export const PERIOD_MINUTE_OPTIONS = [5, 10, 15, 20] as const
 export const FORMATION_PRESETS = {
   '2-3-1': {
     label: '2-3-1',
@@ -27,7 +29,7 @@ export type FormationKey = keyof typeof FORMATION_PRESETS
 export type OutfieldPosition = (typeof ALL_POSITIONS)[number]
 export type RoleGroup = (typeof ROLE_GROUPS)[OutfieldPosition]
 export type Lineup = Partial<Record<OutfieldPosition, string>>
-export type GoalkeeperSelections = [string, string, string]
+export type GoalkeeperSelections = string[]
 export type LiveRecommendationPosition = OutfieldPosition | 'MV'
 export type LiveAdjustmentRole = 'goalkeeper' | 'outfield'
 
@@ -85,7 +87,8 @@ export interface Player {
 
 export interface MatchConfig {
   players: Player[]
-  periodMinutes: 15 | 20
+  periodCount?: number
+  periodMinutes: number
   formation: FormationKey
   chunkMinutes: number
   lockedGoalkeeperIds?: Array<string | null>
@@ -132,9 +135,10 @@ export interface PlayerSummary {
 export interface MatchPlan {
   seed: number
   score: number
+  periodCount?: number
   formation: FormationKey
   chunkMinutes: number
-  periodMinutes: 15 | 20
+  periodMinutes: number
   positions: readonly OutfieldPosition[]
   goalkeepers: string[]
   lockedGoalkeepers: Array<string | null>
@@ -147,7 +151,8 @@ export interface MatchPlan {
 export interface GeneratedConfig {
   playerInput: string
   playerNames: string[]
-  periodMinutes: 15 | 20
+  periodCount?: number
+  periodMinutes: number
   formation: FormationKey
   chunkMinutes: number
   goalkeeperSelections: GoalkeeperSelections

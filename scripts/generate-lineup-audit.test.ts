@@ -16,6 +16,7 @@ import { runLiveAdjustmentScenarios } from '../src/lib/liveAdjustmentScenarios'
 const tempDirs: string[] = []
 const testDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(testDir, '..')
+const tsxCliPath = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
@@ -27,12 +28,12 @@ describe('generate-lineup-audit CLI', () => {
     tempDirs.push(outDir)
 
     const runCli = (seeds: string) =>
-      execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
-        'run',
-        'generate:lineup-audit',
-        '--',
+      execFileSync(process.execPath, [
+        tsxCliPath,
+        path.join(repoRoot, 'scripts', 'generate-lineup-audit.ts'),
         `--outDir=${outDir}`,
         '--playerCounts=8',
+        '--periodCounts=3',
         '--periodMinutes=15',
         '--formations=2-3-1',
         '--substitutions=2',
@@ -48,11 +49,11 @@ describe('generate-lineup-audit CLI', () => {
     runCli('1,7')
 
     const scenarioId =
-      'players-8_period-15_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-single-temporary-out'
+      'players-8_periods-3_period-15_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-single-temporary-out'
     const index = readJson<{
       scenarioCount: number
       exportCount: number
-      filters: { livePatterns: string[] }
+      filters: { livePatterns: string[]; periodCounts: number[] }
     }>(path.join(outDir, 'index.json'))
     const summary = readJson<{ scenarioCount: number; exportCount: number }>(
       path.join(outDir, 'summary.json'),
@@ -65,6 +66,7 @@ describe('generate-lineup-audit CLI', () => {
     expect(index.scenarioCount).toBe(1)
     expect(index.exportCount).toBe(2)
     expect(index.filters.livePatterns).toEqual(['single-temporary-out'])
+    expect(index.filters.periodCounts).toEqual([3])
     expect(summary.scenarioCount).toBe(1)
     expect(summary.exportCount).toBe(2)
     expect(existsSync(promptPath)).toBe(true)
@@ -94,12 +96,12 @@ describe('generate-lineup-audit CLI', () => {
     const outDir = mkdtempSync(path.join(os.tmpdir(), 'lineup-audit-'))
     tempDirs.push(outDir)
 
-    execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
-      'run',
-      'generate:lineup-audit',
-      '--',
+    execFileSync(process.execPath, [
+      tsxCliPath,
+      path.join(repoRoot, 'scripts', 'generate-lineup-audit.ts'),
       `--outDir=${outDir}`,
       '--playerCounts=11,12',
+      '--periodCounts=3',
       '--periodMinutes=20',
       '--formations=3-2-1',
       '--substitutions=3,4',
@@ -122,7 +124,7 @@ describe('generate-lineup-audit CLI', () => {
       path.join(
         outDir,
         'scenarios',
-        'players-12_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
+        'players-12_periods-3_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
         'manifest.json',
       ),
     )
@@ -136,7 +138,7 @@ describe('generate-lineup-audit CLI', () => {
       path.join(
         outDir,
         'scenarios',
-        'players-12_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
+        'players-12_periods-3_period-20_formation-3-2-1_subs-4_gk-auto_roster-canonical_live-none',
         'seed-1.json',
       ),
     )
@@ -146,7 +148,7 @@ describe('generate-lineup-audit CLI', () => {
       path.join(
         outDir,
         'scenarios',
-        'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+        'players-12_periods-3_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
         'manifest.json',
       ),
     )
@@ -157,7 +159,7 @@ describe('generate-lineup-audit CLI', () => {
       path.join(
         outDir,
         'scenarios',
-        'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+        'players-12_periods-3_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
         'seed-1.json',
       ),
     )
@@ -225,6 +227,7 @@ describe('generate-lineup-audit CLI', () => {
 
     const auditScenarios = createAuditScenarios({
       playerCounts: [10],
+      periodCounts: [3],
       periodMinutes: [20],
       formations: ['2-3-1'],
       substitutions: [2],
@@ -256,10 +259,11 @@ describe('generate-lineup-audit CLI', () => {
       expect(auditScenario).toBeDefined()
       expect(liveReport).toBeDefined()
       expect(auditScenario?.scenarioId).toBe(
-        `players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-${pattern}`,
+        `players-10_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-${pattern}`,
       )
       expect(auditScenario).toMatchObject({
         playerCount: liveReport?.initialConfig.playerCount,
+        periodCount: liveReport?.initialConfig.periodCount,
         periodMinutes: liveReport?.initialConfig.periodMinutes,
         formation: liveReport?.initialConfig.formation,
         chunkMinutes: liveReport?.initialConfig.chunkMinutes,

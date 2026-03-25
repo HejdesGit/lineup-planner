@@ -2,7 +2,6 @@ import { buildSummariesFromPeriods } from './planOverrides'
 import { getPlanScoreBreakdown, scoreOutfieldPosition } from './scheduler'
 import {
   ALL_POSITIONS,
-  PERIOD_COUNT,
   ROLE_GROUPS,
   type ChunkPlan,
   type ChunkSubstitution,
@@ -504,7 +503,7 @@ export function replanMatchFromLiveEvent({
       }),
     )
 
-    for (let nextPeriodIndex = periodIndex + 1; nextPeriodIndex < PERIOD_COUNT; nextPeriodIndex += 1) {
+    for (let nextPeriodIndex = periodIndex + 1; nextPeriodIndex < plan.periods.length; nextPeriodIndex += 1) {
       periods.push(
         buildPeriodPlan({
           periodNumber: nextPeriodIndex + 1,
@@ -820,7 +819,7 @@ function replanMatchFromForcedSubstitution({
     }),
   )
 
-  for (let nextPeriodIndex = periodIndex + 1; nextPeriodIndex < PERIOD_COUNT; nextPeriodIndex += 1) {
+  for (let nextPeriodIndex = periodIndex + 1; nextPeriodIndex < plan.periods.length; nextPeriodIndex += 1) {
     const chunks: ChunkPlan[] = []
     previousLineup = null
 
@@ -1083,7 +1082,7 @@ function buildFutureTemplates({
   const templates: MatchChunkTemplate[] = []
   let localChunkIndex = 0
 
-  for (let nextPeriodIndex = periodIndex; nextPeriodIndex < PERIOD_COUNT; nextPeriodIndex += 1) {
+  for (let nextPeriodIndex = periodIndex; nextPeriodIndex < plan.periods.length; nextPeriodIndex += 1) {
     const sourceChunks =
       nextPeriodIndex === periodIndex
         ? plan.periods[nextPeriodIndex].chunks.slice(currentChunkIndex)
@@ -1153,7 +1152,7 @@ function resolveAdjustedGoalkeepers({
   ) as Record<string, number>
   const usedGoalkeepers = new Set(goalkeepers.slice(0, currentPeriodIndex + 1))
 
-  for (let periodIndex = currentPeriodIndex + 1; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+  for (let periodIndex = currentPeriodIndex + 1; periodIndex < plan.periods.length; periodIndex += 1) {
     if (availability[goalkeepers[periodIndex]] === 'available') {
       usedGoalkeepers.add(goalkeepers[periodIndex])
       continue

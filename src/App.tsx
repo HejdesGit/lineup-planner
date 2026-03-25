@@ -76,6 +76,9 @@ import {
 } from './lib/matchTimer'
 import {
   FORMATION_PRESETS,
+  PERIOD_COUNT,
+  PERIOD_COUNT_OPTIONS,
+  PERIOD_MINUTE_OPTIONS,
   type FormationKey,
   type GeneratedConfig,
   type GoalkeeperSelections,
@@ -131,28 +134,18 @@ const DEFAULT_CHUNK_MINUTES = 20 / 3
 const DEFAULT_SHARE_SEED = 20260314
 const DEFAULT_SELECTED_TIMER_PERIOD = 1
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
+const LIVE_NOW_SECTION_ID = 'section-live-now'
 const SUBSTITUTIONS_PER_PERIOD_OPTIONS = [2, 3, 4] as const
 const BOTTOM_TAB_ITEMS = [
   { id: 'pre-match', label: 'Inför match', sectionId: 'section-pre-match' },
   { id: 'match-mode', label: 'Matchläge', sectionId: 'section-match-mode' },
   { id: 'minutes', label: 'Speltid', sectionId: 'section-minutes' },
 ] as const
-const SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES = {
-  15: {
-    2: 7.5,
-    3: 5,
-    4: 3.75,
-  },
-  20: {
-    2: 10,
-    3: 20 / 3,
-    4: 5,
-  },
-} as const
 
 interface FormState {
   playerInput: string
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   formation: FormationKey
   chunkMinutes: number
   goalkeeperSelections: GoalkeeperSelections
@@ -161,7 +154,8 @@ interface FormState {
 
 type FormAction =
   | { type: 'setPlayerInput'; value: string }
-  | { type: 'setPeriodMinutes'; value: 15 | 20 }
+  | { type: 'setPeriodCount'; value: number }
+  | { type: 'setPeriodMinutes'; value: number }
   | { type: 'setFormation'; value: FormationKey }
   | { type: 'setChunkMinutes'; value: number }
   | { type: 'setGoalkeeperSelection'; periodIndex: number; value: string }
@@ -170,10 +164,11 @@ type FormAction =
 
 const INITIAL_FORM_STATE: FormState = {
   playerInput: DEFAULT_PLAYER_INPUT,
+  periodCount: PERIOD_COUNT,
   periodMinutes: 20,
   formation: DEFAULT_FORMATION,
   chunkMinutes: DEFAULT_CHUNK_MINUTES,
-  goalkeeperSelections: ['', '', ''],
+  goalkeeperSelections: createGoalkeeperSelections(PERIOD_COUNT),
   errors: [],
 }
 
@@ -225,6 +220,12 @@ function formReducer(state: FormState, action: FormAction): FormState {
   switch (action.type) {
     case 'setPlayerInput':
       return { ...state, playerInput: action.value }
+    case 'setPeriodCount':
+      return {
+        ...state,
+        periodCount: action.value,
+        goalkeeperSelections: resizeGoalkeeperSelections(state.goalkeeperSelections, action.value),
+      }
     case 'setPeriodMinutes':
       return {
         ...state,
@@ -240,7 +241,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
         ...state,
         goalkeeperSelections: state.goalkeeperSelections.map((selection, index) =>
           index === action.periodIndex ? action.value : selection,
-        ) as GoalkeeperSelections,
+        ),
       }
     case 'setErrors':
       return { ...state, errors: action.value }
@@ -339,6 +340,13 @@ function App() {
   )
   const hasGeneratedPlan = Boolean(displayPlan && plan)
   const showFloatingMatchTimer = Boolean(matchProgress && matchTimeline && matchProgress.status !== 'idle')
+  const showLiveNowPanel = Boolean(
+    liveAvailability &&
+      matchProgress &&
+      matchProgress.activePeriod !== null &&
+      matchProgress.activeChunkIndex !== null &&
+      (matchProgress.status === 'running' || matchProgress.status === 'paused'),
+  )
   const canSelectTimerPeriod =
     Boolean(plan) && matchProgress?.status !== 'running' && matchProgress?.status !== 'paused'
 
@@ -492,6 +500,7 @@ function App() {
       const players = normalizePlayers(formState.playerInput)
       const nextPlan = generateMatchPlan({
         players,
+        periodCount: formState.periodCount,
         periodMinutes: formState.periodMinutes,
         formation: formState.formation,
         chunkMinutes: formState.chunkMinutes,
@@ -501,6 +510,7 @@ function App() {
       const nextGeneratedConfig = buildGeneratedConfig({
         players,
         playerInput: formState.playerInput,
+        periodCount: formState.periodCount,
         periodMinutes: formState.periodMinutes,
         formation: formState.formation,
         chunkMinutes: formState.chunkMinutes,
@@ -748,22 +758,19 @@ function App() {
                 onSelectTimerPeriod={handleSelectTimerPeriod}
               />
 
-              {liveAvailability &&
-              matchProgress &&
-              matchProgress.activePeriod !== null &&
-              matchProgress.activeChunkIndex !== null &&
-              (matchProgress.status === 'running' || matchProgress.status === 'paused') ? (
+              {showLiveNowPanel ? (
                 <LiveNowPanel
-                  key={`live-period-${matchProgress.activePeriod}`}
+                  id={LIVE_NOW_SECTION_ID}
+                  key={`live-period-${matchProgress!.activePeriod}`}
                   plan={displayPlan}
                   period={
-                    displayPlan.periods.find((period) => period.period === matchProgress.activePeriod) ??
+                    displayPlan.periods.find((period) => period.period === matchProgress!.activePeriod) ??
                     displayPlan.periods[0]
                   }
-                  availability={liveAvailability}
+                  availability={liveAvailability!}
                   nameById={playerNameById}
-                  activeMinute={roundMinuteValue(matchProgress.elapsedMs / 60_000)}
-                  activeChunkIndex={matchProgress.activeChunkIndex}
+                  activeMinute={roundMinuteValue(matchProgress!.elapsedMs / 60_000)}
+                  activeChunkIndex={matchProgress!.activeChunkIndex!}
                   unavailableRoleById={unavailableRoleById}
                   onApplyLiveEvent={handleApplyLiveEvent}
                 />
@@ -817,7 +824,8 @@ function App() {
                 <FloatingMatchTimer
                   matchProgress={matchProgress!}
                   matchTimeline={matchTimeline!}
-                  onScrollToActiveSection={scrollToActiveMatchSection}
+                  canScrollToLiveNowSection={showLiveNowPanel}
+                  onScrollToLiveNowSection={scrollToLiveNowSection}
                 />
               ) : null}
             </>
@@ -842,20 +850,10 @@ function App() {
     </main>
   )
 
-  function scrollToActiveMatchSection() {
-    if (!matchProgress) {
-      return
-    }
-
-    const activeChunkId = getActiveChunkAnchorId(matchProgress)
-
-    if (!activeChunkId) {
-      return
-    }
-
-    document.getElementById(activeChunkId)?.scrollIntoView({
+  function scrollToLiveNowSection() {
+    document.getElementById(LIVE_NOW_SECTION_ID)?.scrollIntoView({
       behavior: 'smooth',
-      block: 'center',
+      block: 'start',
     })
   }
 }
@@ -913,7 +911,7 @@ function SettingsPanel({
           </p>
         </div>
         <div className="w-fit rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 font-mono text-xs text-clay-100">
-          3 perioder
+          {state.periodCount} {state.periodCount === 1 ? 'period' : 'perioder'}
         </div>
       </div>
 
@@ -963,17 +961,36 @@ function SettingsPanel({
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <Field label="Matchformat" htmlFor="match-format">
             <SelectControl
               id="match-format"
               value={state.periodMinutes}
               onChange={(event) =>
-                dispatch({ type: 'setPeriodMinutes', value: Number(event.target.value) as 15 | 20 })
+                dispatch({ type: 'setPeriodMinutes', value: Number(event.target.value) })
               }
             >
-              <option value={15}>3 x 15 minuter</option>
-              <option value={20}>3 x 20 minuter</option>
+              {PERIOD_MINUTE_OPTIONS.map((periodMinutes) => (
+                <option key={`period-minutes-${periodMinutes}`} value={periodMinutes}>
+                  {periodMinutes} minuter
+                </option>
+              ))}
+            </SelectControl>
+          </Field>
+
+          <Field label="Antal perioder" htmlFor="period-count">
+            <SelectControl
+              id="period-count"
+              value={state.periodCount}
+              onChange={(event) =>
+                dispatch({ type: 'setPeriodCount', value: Number(event.target.value) })
+              }
+            >
+              {PERIOD_COUNT_OPTIONS.map((periodCount) => (
+                <option key={`period-count-${periodCount}`} value={periodCount}>
+                  {periodCount}
+                </option>
+              ))}
             </SelectControl>
           </Field>
 
@@ -1023,8 +1040,8 @@ function SettingsPanel({
           ) : null}
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          {Array.from({ length: 3 }, (_, index) => (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: state.periodCount }, (_, index) => (
             <Field
               key={`goalkeeper-period-${index + 1}`}
               label={`Målvakt period ${index + 1}`}
@@ -1085,6 +1102,7 @@ function SettingsPanel({
 }
 
 function LiveNowPanel({
+  id,
   plan,
   period,
   availability,
@@ -1094,6 +1112,7 @@ function LiveNowPanel({
   unavailableRoleById,
   onApplyLiveEvent,
 }: {
+  id?: string
   plan: MatchPlan
   period: PeriodPlan
   availability: LiveAvailabilityState
@@ -1260,7 +1279,10 @@ function LiveNowPanel({
   }
 
   return (
-    <section className="rounded-[1.75rem] border border-clay-300/20 bg-clay-500/10 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur sm:p-5">
+    <section
+      id={id}
+      className="scroll-mt-4 rounded-[1.75rem] border border-clay-300/20 bg-clay-500/10 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)] backdrop-blur sm:p-5"
+    >
       <div className="mb-3">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-clay-100/75">
@@ -1415,7 +1437,7 @@ function MatchOverview({
               label="Byten"
               value={`${getSubstitutionsPerPeriod(plan.periodMinutes, plan.chunkMinutes)} per period`}
             />
-            <SummaryChip label="Totaltid" value={`${plan.periodMinutes * 3} min match`} />
+            <SummaryChip label="Totaltid" value={`${plan.periodMinutes * plan.periods.length} min match`} />
           </div>
         </div>
 
@@ -1587,14 +1609,15 @@ function MatchTimerPanel({
 function FloatingMatchTimer({
   matchProgress,
   matchTimeline,
-  onScrollToActiveSection,
+  canScrollToLiveNowSection,
+  onScrollToLiveNowSection,
 }: {
   matchProgress: MatchProgress
   matchTimeline: MatchTimeline
-  onScrollToActiveSection: () => void
+  canScrollToLiveNowSection: boolean
+  onScrollToLiveNowSection: () => void
 }) {
   const statusLabel = getMatchStatusLabel(matchProgress)
-  const canScrollToActiveSection = Boolean(getActiveChunkAnchorId(matchProgress))
 
   return (
     <aside className="pointer-events-none fixed inset-x-3 bottom-24 z-40 sm:bottom-28 lg:inset-x-auto lg:right-4 lg:top-4 lg:bottom-auto">
@@ -1619,10 +1642,10 @@ function FloatingMatchTimer({
             </p>
           </div>
         </div>
-        {canScrollToActiveSection ? (
+        {canScrollToLiveNowSection ? (
           <button
             type="button"
-            onClick={onScrollToActiveSection}
+            onClick={onScrollToLiveNowSection}
             className="mt-3 text-left text-xs font-medium uppercase tracking-[0.18em] text-clay-100/75 transition hover:text-clay-50 focus:outline-none focus:ring-2 focus:ring-clay-300/30"
           >
             {getMatchProgressSummary(matchProgress, matchProgress.activePeriod ?? DEFAULT_SELECTED_TIMER_PERIOD)}
@@ -3160,18 +3183,20 @@ function createInitialAppState(): InitialAppState {
 function createDefaultAppState(): InitialAppState {
   const playerInput = INITIAL_FORM_STATE.playerInput
   const players = normalizePlayers(playerInput)
-  const initialGoalkeeperSelections = [...INITIAL_FORM_STATE.goalkeeperSelections] as GoalkeeperSelections
+  const initialGoalkeeperSelections = [...INITIAL_FORM_STATE.goalkeeperSelections]
   const initialPlan = generateMatchPlan({
     players,
+    periodCount: INITIAL_FORM_STATE.periodCount,
     periodMinutes: INITIAL_FORM_STATE.periodMinutes,
     formation: INITIAL_FORM_STATE.formation,
     chunkMinutes: INITIAL_FORM_STATE.chunkMinutes,
-    lockedGoalkeeperIds: [null, null, null],
+    lockedGoalkeeperIds: createGoalkeeperSelections(INITIAL_FORM_STATE.periodCount).map(() => null),
     seed: DEFAULT_SHARE_SEED,
   })
   const generatedConfig = buildGeneratedConfig({
     players,
     playerInput,
+    periodCount: INITIAL_FORM_STATE.periodCount,
     periodMinutes: INITIAL_FORM_STATE.periodMinutes,
     formation: INITIAL_FORM_STATE.formation,
     chunkMinutes: INITIAL_FORM_STATE.chunkMinutes,
@@ -3206,12 +3231,15 @@ function createHydratedStateFromSnapshot(encodedSnapshot: string) {
 }
 
 function createFormStateFromConfig(config: GeneratedConfig): FormState {
+  const periodCount = normalizePeriodCount(config.periodCount)
+
   return {
     playerInput: config.playerInput,
+    periodCount,
     periodMinutes: config.periodMinutes,
     formation: config.formation,
     chunkMinutes: config.chunkMinutes,
-    goalkeeperSelections: [...config.goalkeeperSelections] as GoalkeeperSelections,
+    goalkeeperSelections: resizeGoalkeeperSelections(config.goalkeeperSelections, periodCount),
     errors: [],
   }
 }
@@ -3249,9 +3277,24 @@ function clearStoredActiveMatchTimer() {
   }
 }
 
+function normalizePeriodCount(periodCount?: number) {
+  return PERIOD_COUNT_OPTIONS.includes(periodCount as (typeof PERIOD_COUNT_OPTIONS)[number])
+    ? (periodCount ?? PERIOD_COUNT)
+    : PERIOD_COUNT
+}
+
+function createGoalkeeperSelections(periodCount: number) {
+  return Array.from({ length: periodCount }, () => '')
+}
+
+function resizeGoalkeeperSelections(selections: GoalkeeperSelections, periodCount: number) {
+  return Array.from({ length: periodCount }, (_, index) => selections[index] ?? '')
+}
+
 function buildGeneratedConfig({
   players,
   playerInput,
+  periodCount,
   periodMinutes,
   formation,
   chunkMinutes,
@@ -3260,7 +3303,8 @@ function buildGeneratedConfig({
 }: {
   players: Player[]
   playerInput: string
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   formation: FormationKey
   chunkMinutes: number
   goalkeeperSelections: GoalkeeperSelections
@@ -3269,10 +3313,11 @@ function buildGeneratedConfig({
   return {
     playerInput,
     playerNames: players.map((player) => player.name),
+    periodCount,
     periodMinutes,
     formation,
     chunkMinutes,
-    goalkeeperSelections: [...goalkeeperSelections] as GoalkeeperSelections,
+    goalkeeperSelections: resizeGoalkeeperSelections(goalkeeperSelections, periodCount),
     seed,
   }
 }
@@ -3282,6 +3327,7 @@ function buildPlanFromGeneratedConfig(config: GeneratedConfig, exactSeed = false
 
   return generateMatchPlan({
     players,
+    periodCount: normalizePeriodCount(config.periodCount),
     periodMinutes: config.periodMinutes,
     formation: config.formation,
     chunkMinutes: config.chunkMinutes,
@@ -3397,7 +3443,7 @@ function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinut
   }
 }
 
-function getSubstitutionOptions(periodMinutes: 15 | 20, currentChunkMinutes?: number) {
+function getSubstitutionOptions(periodMinutes: number, currentChunkMinutes?: number) {
   const options = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) => {
     const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
 
@@ -3499,15 +3545,7 @@ function getChunkAnchorId(period: number, chunkIndex: number) {
   return `active-period-${period}-chunk-${chunkIndex}`
 }
 
-function getActiveChunkAnchorId(matchProgress: MatchProgress) {
-  if (matchProgress.activePeriod === null || matchProgress.activeChunkIndex === null) {
-    return null
-  }
-
-  return getChunkAnchorId(matchProgress.activePeriod, matchProgress.activeChunkIndex)
-}
-
-function getNormalizedChunkMinutes(periodMinutes: 15 | 20, currentChunkMinutes: number) {
+function getNormalizedChunkMinutes(periodMinutes: number, currentChunkMinutes: number) {
   const supportedChunkMinutes = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) =>
     getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
   )
@@ -3517,7 +3555,7 @@ function getNormalizedChunkMinutes(periodMinutes: 15 | 20, currentChunkMinutes: 
     : supportedChunkMinutes[0]
 }
 
-function formatChunkPattern(periodMinutes: 15 | 20, chunkMinutes: number) {
+function formatChunkPattern(periodMinutes: number, chunkMinutes: number) {
   const windows: number[] = []
   let remainingMinutes = periodMinutes
 
@@ -3595,13 +3633,13 @@ function splitMinutesAndSeconds(value: number) {
 }
 
 function getChunkMinutesForSubstitutions(
-  periodMinutes: 15 | 20,
+  periodMinutes: number,
   substitutionsPerPeriod: (typeof SUBSTITUTIONS_PER_PERIOD_OPTIONS)[number],
 ) {
-  return SUBSTITUTIONS_PER_PERIOD_TO_CHUNK_MINUTES[periodMinutes][substitutionsPerPeriod]
+  return periodMinutes / substitutionsPerPeriod
 }
 
-function getSubstitutionsPerPeriod(periodMinutes: 15 | 20, chunkMinutes: number) {
+function getSubstitutionsPerPeriod(periodMinutes: number, chunkMinutes: number) {
   const match = SUBSTITUTIONS_PER_PERIOD_OPTIONS.find((substitutionsPerPeriod) =>
     areMinuteValuesEqual(getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod), chunkMinutes),
   )

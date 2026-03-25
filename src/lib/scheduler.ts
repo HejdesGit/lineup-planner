@@ -2,6 +2,8 @@ import {
   ALL_POSITIONS,
   FORMATION_PRESETS,
   PERIOD_COUNT,
+  PERIOD_COUNT_OPTIONS,
+  PERIOD_MINUTE_OPTIONS,
   ROLE_GROUPS,
   type ChunkSubstitution,
   type FormationKey,
@@ -246,6 +248,7 @@ function scoreWithinGroupPosition(
 
 export function generateMatchPlan({
   players,
+  periodCount = PERIOD_COUNT,
   periodMinutes,
   formation,
   chunkMinutes,
@@ -253,8 +256,8 @@ export function generateMatchPlan({
   seed = Date.now(),
   attempts,
 }: MatchConfig): MatchPlan {
-  validateConfig(players, periodMinutes, formation, chunkMinutes, lockedGoalkeeperIds)
-  const resolvedAttempts = resolveAttemptCount({ players, periodMinutes, chunkMinutes, attempts })
+  validateConfig(players, periodCount, periodMinutes, formation, chunkMinutes, lockedGoalkeeperIds)
+  const resolvedAttempts = resolveAttemptCount({ players, periodCount, periodMinutes, chunkMinutes, attempts })
 
   let best: CandidatePlan | null = null
   let bestSeed = seed
@@ -263,6 +266,7 @@ export function generateMatchPlan({
     const candidateSeed = (seed + index * 7919) >>> 0
     const candidate = buildCandidatePlan(
       players,
+      periodCount,
       periodMinutes,
       formation,
       chunkMinutes,
@@ -286,12 +290,13 @@ export function generateMatchPlan({
   return {
     seed: bestSeed,
     score: best.score,
+    periodCount,
     formation,
     chunkMinutes,
     periodMinutes,
     positions: FORMATION_PRESETS[formation].positions,
     goalkeepers: best.goalkeepers,
-    lockedGoalkeepers: normalizeLockedGoalkeepers(lockedGoalkeeperIds),
+    lockedGoalkeepers: normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount),
     targets: best.targets,
     fairnessTargets: best.fairnessTargets,
     periods: best.periods,
@@ -301,6 +306,7 @@ export function generateMatchPlan({
 
 function validateConfig(
   players: Player[],
+  periodCount: number,
   periodMinutes: number,
   formation: FormationKey,
   chunkMinutes: number,
@@ -310,20 +316,30 @@ function validateConfig(
     throw new Error('Antalet spelare måste vara mellan 8 och 12.')
   }
 
-  if (periodMinutes !== 15 && periodMinutes !== 20) {
-    throw new Error('Matchtiden måste vara 15 eller 20 minuter per period.')
+  if (
+    !Number.isInteger(periodCount) ||
+    !PERIOD_COUNT_OPTIONS.includes(periodCount as (typeof PERIOD_COUNT_OPTIONS)[number])
+  ) {
+    throw new Error('Antal perioder måste vara mellan 1 och 4.')
+  }
+
+  if (
+    !Number.isInteger(periodMinutes) ||
+    !PERIOD_MINUTE_OPTIONS.includes(periodMinutes as (typeof PERIOD_MINUTE_OPTIONS)[number])
+  ) {
+    throw new Error('Matchtiden måste vara 5, 10, 15 eller 20 minuter per period.')
   }
 
   if (!(formation in FORMATION_PRESETS)) {
     throw new Error('Formationen stöds inte.')
   }
 
-  if (!isValidChunkMinutes(chunkMinutes)) {
-    throw new Error('Bytesfönstret måste vara mellan 5 och 10 minuter i hela eller halva minuter.')
+  if (!isValidChunkMinutes(chunkMinutes) || chunkMinutes > periodMinutes) {
+    throw new Error('Bytesfönstret måste vara större än 0 och högst lika långt som perioden.')
   }
 
-  if (lockedGoalkeeperIds && lockedGoalkeeperIds.length !== PERIOD_COUNT) {
-    throw new Error('Målvaktsval måste anges för exakt tre perioder.')
+  if (lockedGoalkeeperIds && lockedGoalkeeperIds.length !== periodCount) {
+    throw new Error(`Målvaktsval måste anges för exakt ${periodCount} perioder.`)
   }
 
   if (lockedGoalkeeperIds) {
@@ -331,7 +347,7 @@ function validateConfig(
       (goalkeeperId): goalkeeperId is string => Boolean(goalkeeperId),
     )
     if (new Set(selectedGoalkeepers).size !== selectedGoalkeepers.length) {
-      throw new Error('Välj tre olika målvakter om du låser perioderna manuellt.')
+      throw new Error('Välj olika målvakter om du låser perioderna manuellt.')
     }
 
     for (const goalkeeperId of selectedGoalkeepers) {
@@ -344,7 +360,8 @@ function validateConfig(
 
 function buildCandidatePlan(
   players: Player[],
-  periodMinutes: 15 | 20,
+  periodCount: number,
+  periodMinutes: number,
   formation: FormationKey,
   chunkMinutes: number,
   lockedGoalkeeperIds: Array<string | null> | undefined,
@@ -352,8 +369,8 @@ function buildCandidatePlan(
 ): CandidatePlan | null {
   const rng = createRng(seed)
   const positions = FORMATION_PRESETS[formation].positions
-  const matchChunks = buildMatchChunks(periodMinutes, chunkMinutes)
-  const totalPlayerMinutes = PERIOD_COUNT * periodMinutes * 7
+  const matchChunks = buildMatchChunks(periodCount, periodMinutes, chunkMinutes)
+  const totalPlayerMinutes = periodCount * periodMinutes * 7
   const playerIds = players.map((player) => player.id)
   const playerOrderById = Object.fromEntries(playerIds.map((id, index) => [id, index])) as Record<
     string,
@@ -361,7 +378,12 @@ function buildCandidatePlan(
   >
   const nameById = Object.fromEntries(players.map((player) => [player.id, player.name]))
   const targets = distributeTargetMinutes(playerIds, totalPlayerMinutes, rng)
-  const goalkeepers = resolveGoalkeepers(playerIds, normalizeLockedGoalkeepers(lockedGoalkeeperIds), rng)
+  const goalkeepers = resolveGoalkeepers(
+    playerIds,
+    normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount),
+    periodCount,
+    rng,
+  )
   const goalkeeperMinuteCounts = Object.fromEntries(playerIds.map((id) => [id, 0])) as Record<
     string,
     number
@@ -378,7 +400,7 @@ function buildCandidatePlan(
   const histories = createHistories(players, goalkeepers)
   const periods: PeriodPlan[] = []
 
-  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+  for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     const goalkeeperId = goalkeepers[periodIndex]
     const chunks = []
     const substituteSet = new Set<string>()
@@ -536,13 +558,14 @@ function buildCandidatePlan(
   }
 }
 
-function normalizeLockedGoalkeepers(lockedGoalkeeperIds?: Array<string | null>) {
-  return Array.from({ length: PERIOD_COUNT }, (_, index) => lockedGoalkeeperIds?.[index] ?? null)
+function normalizeLockedGoalkeepers(lockedGoalkeeperIds: Array<string | null> | undefined, periodCount: number) {
+  return Array.from({ length: periodCount }, (_, index) => lockedGoalkeeperIds?.[index] ?? null)
 }
 
 function resolveGoalkeepers(
   playerIds: string[],
   lockedGoalkeeperIds: Array<string | null>,
+  periodCount: number,
   rng: () => number,
 ) {
   const chosen = [...lockedGoalkeeperIds]
@@ -552,14 +575,14 @@ function resolveGoalkeepers(
     rng,
   )
 
-  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+  for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     if (chosen[periodIndex]) {
       continue
     }
 
     const nextGoalkeeper = remainingIds.shift()
     if (!nextGoalkeeper) {
-      throw new Error('Det finns inte tillräckligt många spelare för att välja tre olika målvakter.')
+      throw new Error('Det finns inte tillräckligt många spelare för att välja olika målvakter.')
     }
     chosen[periodIndex] = nextGoalkeeper
   }
@@ -569,12 +592,14 @@ function resolveGoalkeepers(
 
 export function resolveAttemptCount({
   players,
+  periodCount = PERIOD_COUNT,
   periodMinutes,
   chunkMinutes,
   attempts,
 }: {
   players: Player[]
-  periodMinutes: 15 | 20
+  periodCount?: number
+  periodMinutes: number
   chunkMinutes: number
   attempts?: number
 }) {
@@ -582,18 +607,18 @@ export function resolveAttemptCount({
     return attempts
   }
 
-  return Math.max(DEFAULT_ATTEMPTS, players.length * getTotalChunkCount(periodMinutes, chunkMinutes) * 2)
+  return Math.max(DEFAULT_ATTEMPTS, players.length * getTotalChunkCount(periodCount, periodMinutes, chunkMinutes) * 2)
 }
 
-function getTotalChunkCount(periodMinutes: 15 | 20, chunkMinutes: number) {
-  return PERIOD_COUNT * Math.ceil(periodMinutes / chunkMinutes)
+function getTotalChunkCount(periodCount: number, periodMinutes: number, chunkMinutes: number) {
+  return periodCount * Math.ceil(periodMinutes / chunkMinutes)
 }
 
-function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchChunk[] {
+function buildMatchChunks(periodCount: number, periodMinutes: number, chunkMinutes: number): MatchChunk[] {
   const chunks: MatchChunk[] = []
   let chunkIndex = 0
 
-  for (let periodIndex = 0; periodIndex < PERIOD_COUNT; periodIndex += 1) {
+  for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     let cursor = 0
     let windowIndex = 0
 
@@ -617,7 +642,7 @@ function buildMatchChunks(periodMinutes: 15 | 20, chunkMinutes: number): MatchCh
 }
 
 function isValidChunkMinutes(chunkMinutes: number) {
-  return Number.isFinite(chunkMinutes) && chunkMinutes >= 3.75 && chunkMinutes <= 10
+  return Number.isFinite(chunkMinutes) && chunkMinutes > 0
 }
 
 function roundMinuteValue(value: number) {

@@ -5,6 +5,7 @@ import {
   DEFAULT_AUDIT_LIVE_PATTERNS,
   DEFAULT_AUDIT_FORMATIONS,
   DEFAULT_AUDIT_GOALKEEPER_MODES,
+  DEFAULT_AUDIT_PERIOD_COUNTS,
   DEFAULT_AUDIT_PERIOD_MINUTES,
   DEFAULT_AUDIT_PLAYER_COUNTS,
   DEFAULT_AUDIT_ROSTER_ORDERS,
@@ -120,6 +121,7 @@ async function main() {
       scenarioId: scenario.scenarioId,
       config: {
         playerCount: scenario.playerCount,
+        periodCount: scenario.periodCount,
         periodMinutes: scenario.periodMinutes,
         formation: scenario.formation,
         substitutionsPerPeriod: scenario.substitutionsPerPeriod,
@@ -142,6 +144,7 @@ async function main() {
     exportCount: recordsWithContext.length,
     filters: {
       playerCounts: options.filters.playerCounts ?? [...DEFAULT_AUDIT_PLAYER_COUNTS],
+      periodCounts: options.filters.periodCounts ?? [...DEFAULT_AUDIT_PERIOD_COUNTS],
       periodMinutes: options.filters.periodMinutes ?? [...DEFAULT_AUDIT_PERIOD_MINUTES],
       formations: options.filters.formations ?? [...DEFAULT_AUDIT_FORMATIONS],
       substitutions: options.filters.substitutions ?? [...SUBSTITUTIONS_PER_PERIOD_OPTIONS],
@@ -167,6 +170,7 @@ function parseCliArgs(argv: string[]) {
     options: {
       outDir: { type: 'string' },
       playerCounts: { type: 'string' },
+      periodCounts: { type: 'string' },
       periodMinutes: { type: 'string' },
       formations: { type: 'string' },
       substitutions: { type: 'string' },
@@ -184,7 +188,8 @@ function parseCliArgs(argv: string[]) {
     clean: parseBoolean(values.clean),
     filters: {
       playerCounts: parseNumberList(values.playerCounts),
-      periodMinutes: parseNumberList(values.periodMinutes) as Array<15 | 20> | undefined,
+      periodCounts: parseNumberList(values.periodCounts),
+      periodMinutes: parseNumberList(values.periodMinutes),
       formations: parseStringList(values.formations) as FormationKey[] | undefined,
       substitutions: parseNumberList(values.substitutions) as SubstitutionsPerPeriod[] | undefined,
       goalkeeperModes: parseStringList(values.goalkeeperModes) as
@@ -213,6 +218,7 @@ function buildSummary(
     validationFailureCount: recordsWithContext.filter(({ record }) => !record.validations.allPassed).length,
     byDimension: {
       playerCount: buildDimensionBuckets(recordsWithContext, ({ scenario }) => `${scenario.playerCount}`),
+      periodCount: buildDimensionBuckets(recordsWithContext, ({ scenario }) => `${scenario.periodCount}`),
       periodMinutes: buildDimensionBuckets(recordsWithContext, ({ scenario }) => `${scenario.periodMinutes}`),
       formation: buildDimensionBuckets(recordsWithContext, ({ scenario }) => scenario.formation),
       substitutionsPerPeriod: buildDimensionBuckets(
@@ -351,6 +357,7 @@ Du granskar exportdata i \`docs/generated-lineups\`. Fokusera på resultaten i e
 - \`aggregate.maxMinuteSpread\`
 - \`aggregate.maxBenchSpread\`
 - \`config.playerCount\`
+- \`config.periodCount\`
 - \`config.periodMinutes\`
 - \`config.formation\`
 - \`config.substitutionsPerPeriod\`

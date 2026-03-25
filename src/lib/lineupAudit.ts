@@ -13,7 +13,8 @@ import {
   type SubstitutionsPerPeriod,
 } from './substitutions'
 import {
-  PERIOD_COUNT,
+  PERIOD_COUNT_OPTIONS,
+  PERIOD_MINUTE_OPTIONS,
   type FormationKey,
   type LiveAdjustmentEvent,
   type MatchPlan,
@@ -22,13 +23,14 @@ import {
 } from './types'
 
 export const DEFAULT_AUDIT_PLAYER_COUNTS = [8, 9, 10, 11, 12] as const
-export const DEFAULT_AUDIT_PERIOD_MINUTES = [15, 20] as const
+export const DEFAULT_AUDIT_PERIOD_COUNTS = [...PERIOD_COUNT_OPTIONS] as const
+export const DEFAULT_AUDIT_PERIOD_MINUTES = [...PERIOD_MINUTE_OPTIONS] as const
 export const DEFAULT_AUDIT_FORMATIONS = ['2-3-1', '3-2-1'] as const
 export const DEFAULT_AUDIT_GOALKEEPER_MODES = [
   'auto',
   'lock-period-1',
-  'lock-period-1-and-3',
-  'lock-all-3',
+  'lock-period-1-and-last',
+  'lock-all-periods',
 ] as const
 export const DEFAULT_AUDIT_ROSTER_ORDERS = ['canonical', 'reversed'] as const
 export const ALL_AUDIT_LIVE_PATTERNS = [
@@ -70,7 +72,8 @@ export type AuditFlag =
 export interface AuditScenario {
   scenarioId: string
   playerCount: number
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   formation: FormationKey
   substitutionsPerPeriod: SubstitutionsPerPeriod
   chunkMinutes: number
@@ -82,7 +85,8 @@ export interface AuditScenario {
 
 export interface AuditScenarioFilters {
   playerCounts?: readonly number[]
-  periodMinutes?: ReadonlyArray<15 | 20>
+  periodCounts?: readonly number[]
+  periodMinutes?: readonly number[]
   formations?: readonly FormationKey[]
   substitutions?: readonly SubstitutionsPerPeriod[]
   goalkeeperModes?: readonly GoalkeeperMode[]
@@ -158,7 +162,8 @@ export interface AuditInputSnapshot {
   seed: number
   playerCount: number
   players: Player[]
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   formation: FormationKey
   substitutionsPerPeriod: SubstitutionsPerPeriod
   chunkMinutes: number
@@ -230,6 +235,7 @@ export interface ScenarioAggregate {
 
 export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditScenario[] {
   const playerCounts = resolveFilter(DEFAULT_AUDIT_PLAYER_COUNTS, filters.playerCounts, 'spelarantal')
+  const periodCounts = resolveFilter(DEFAULT_AUDIT_PERIOD_COUNTS, filters.periodCounts, 'periodantal')
   const periodMinutesValues = resolveFilter(
     DEFAULT_AUDIT_PERIOD_MINUTES,
     filters.periodMinutes,
@@ -258,33 +264,41 @@ export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditS
   const scenarios: AuditScenario[] = []
 
   for (const playerCount of playerCounts) {
-    for (const periodMinutes of periodMinutesValues) {
-      for (const formation of formations) {
-        for (const substitutionsPerPeriod of substitutions) {
-          const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
-          for (const goalkeeperMode of goalkeeperModes) {
-            for (const rosterOrder of rosterOrders) {
-              for (const liveAdjustmentPattern of liveAdjustmentPatterns) {
-                scenarios.push({
-                  scenarioId: buildScenarioId({
+    for (const periodCount of periodCounts) {
+      for (const periodMinutes of periodMinutesValues) {
+        for (const formation of formations) {
+          for (const substitutionsPerPeriod of substitutions) {
+            const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
+            for (const goalkeeperMode of goalkeeperModes) {
+              for (const rosterOrder of rosterOrders) {
+                for (const liveAdjustmentPattern of liveAdjustmentPatterns) {
+                  if (!isLivePatternCompatible(liveAdjustmentPattern, periodCount)) {
+                    continue
+                  }
+
+                  scenarios.push({
+                    scenarioId: buildScenarioId({
+                      playerCount,
+                      periodCount,
+                      periodMinutes,
+                      formation,
+                      substitutionsPerPeriod,
+                      goalkeeperMode,
+                      rosterOrder,
+                      liveAdjustmentPattern,
+                    }),
                     playerCount,
+                    periodCount,
                     periodMinutes,
                     formation,
                     substitutionsPerPeriod,
+                    chunkMinutes,
                     goalkeeperMode,
                     rosterOrder,
+                    rosterNames: getRosterNames(playerCount, rosterOrder),
                     liveAdjustmentPattern,
-                  }),
-                  playerCount,
-                  periodMinutes,
-                  formation,
-                  substitutionsPerPeriod,
-                  chunkMinutes,
-                  goalkeeperMode,
-                  rosterOrder,
-                  rosterNames: getRosterNames(playerCount, rosterOrder),
-                  liveAdjustmentPattern,
-                })
+                  })
+                }
               }
             }
           }
@@ -298,6 +312,7 @@ export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditS
 
 export function buildScenarioId({
   playerCount,
+  periodCount,
   periodMinutes,
   formation,
   substitutionsPerPeriod,
@@ -306,7 +321,8 @@ export function buildScenarioId({
   liveAdjustmentPattern,
 }: {
   playerCount: number
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   formation: FormationKey
   substitutionsPerPeriod: SubstitutionsPerPeriod
   goalkeeperMode: GoalkeeperMode
@@ -315,6 +331,7 @@ export function buildScenarioId({
 }) {
   return [
     `players-${playerCount}`,
+    `periods-${periodCount}`,
     `period-${periodMinutes}`,
     `formation-${formation}`,
     `subs-${substitutionsPerPeriod}`,
@@ -324,16 +341,25 @@ export function buildScenarioId({
   ].join('_')
 }
 
-export function resolveLockedGoalkeeperIds(players: Player[], goalkeeperMode: GoalkeeperMode) {
+export function resolveLockedGoalkeeperIds(
+  players: Player[],
+  goalkeeperMode: GoalkeeperMode,
+  periodCount: number,
+) {
+  const ids = Array.from({ length: periodCount }, () => null as string | null)
+
   switch (goalkeeperMode) {
     case 'auto':
-      return [null, null, null]
+      return ids
     case 'lock-period-1':
-      return [players[0]?.id ?? null, null, null]
-    case 'lock-period-1-and-3':
-      return [players[0]?.id ?? null, null, players[2]?.id ?? null]
-    case 'lock-all-3':
-      return [players[0]?.id ?? null, players[1]?.id ?? null, players[2]?.id ?? null]
+      ids[0] = players[0]?.id ?? null
+      return ids
+    case 'lock-period-1-and-last':
+      ids[0] = players[0]?.id ?? null
+      ids[periodCount - 1] = players[Math.min(periodCount - 1, players.length - 1)]?.id ?? null
+      return ids
+    case 'lock-all-periods':
+      return ids.map((_, index) => players[index]?.id ?? null)
   }
 }
 
@@ -343,14 +369,20 @@ export function generateAuditRecord(
   overrides: AuditRecordOverrides = {},
 ): GeneratedAuditRecord {
   const players = createNamedPlayers(scenario.playerCount, scenario.rosterOrder)
-  const lockedGoalkeeperIds = resolveLockedGoalkeeperIds(players, scenario.goalkeeperMode)
+  const lockedGoalkeeperIds = resolveLockedGoalkeeperIds(
+    players,
+    scenario.goalkeeperMode,
+    scenario.periodCount,
+  )
   const attempts = resolveAttemptCount({
     players,
+    periodCount: scenario.periodCount,
     periodMinutes: scenario.periodMinutes,
     chunkMinutes: scenario.chunkMinutes,
   })
   const plan = generateMatchPlan({
     players,
+    periodCount: scenario.periodCount,
     periodMinutes: scenario.periodMinutes,
     formation: scenario.formation,
     chunkMinutes: scenario.chunkMinutes,
@@ -379,6 +411,7 @@ export function generateAuditRecord(
       seed,
       playerCount: scenario.playerCount,
       players,
+      periodCount: scenario.periodCount,
       periodMinutes: scenario.periodMinutes,
       formation: scenario.formation,
       substitutionsPerPeriod: scenario.substitutionsPerPeriod,
@@ -470,14 +503,15 @@ export function analyzeMatchPlan(
   const allChunks = plan.periods.flatMap((period) => period.chunks)
   const consecutiveBenchAllowance = getConsecutiveBenchAllowance(playerCount)
   const substitutionsPerPeriod = getSubstitutionsPerPeriod(plan.periodMinutes, chunkMinutes)
+  const periodCount = plan.periods.length
   const isolatedPlayBlockPolicy = getIsolatedPlayBlockPolicy({
     playerCount,
     chunkMinutes,
     substitutionsPerPeriod,
   })
-  const matchMinutes = PERIOD_COUNT * plan.periodMinutes
-  const expectedTotalMinutes = PERIOD_COUNT * plan.periodMinutes * 7
-  const expectedBenchMinutes = PERIOD_COUNT * plan.periodMinutes * (playerCount - 7)
+  const matchMinutes = periodCount * plan.periodMinutes
+  const expectedTotalMinutes = periodCount * plan.periodMinutes * 7
+  const expectedBenchMinutes = periodCount * plan.periodMinutes * (playerCount - 7)
   const actualTotalMinutes = roundAuditValue(
     plan.summaries.reduce((total, summary) => total + summary.totalMinutes, 0),
   )
@@ -1285,6 +1319,28 @@ function buildLiveAdjustmentFairness(plan: MatchPlan) {
     ),
     toleranceMinutes: roundAuditValue(plan.chunkMinutes + LIVE_ADJUSTMENT_TOLERANCE_OFFSET),
   }
+}
+
+function getMinimumPeriodCountForLivePattern(pattern: LiveAdjustmentPattern) {
+  switch (pattern) {
+    case 'none':
+      return 1
+    case 'quick-return':
+      return 1
+    case 'single-temporary-out':
+    case 'injury-mid-match':
+    case 'double-temporary-out':
+    case 'position-swap-outfield':
+    case 'position-swap-goalkeeper':
+    case 'position-swap-bench':
+      return 2
+    case 'cross-period-return':
+      return 3
+  }
+}
+
+function isLivePatternCompatible(pattern: LiveAdjustmentPattern, periodCount: number) {
+  return periodCount >= getMinimumPeriodCountForLivePattern(pattern)
 }
 
 function average(values: number[]) {

@@ -1,6 +1,8 @@
 import {
   FORMATION_PRESETS,
   PERIOD_COUNT,
+  PERIOD_COUNT_OPTIONS,
+  PERIOD_MINUTE_OPTIONS,
   type GeneratedConfig,
   type LiveAdjustmentEvent,
 } from './types'
@@ -10,7 +12,7 @@ export const LINEUP_SHARE_QUERY_PARAM = 'lineup'
 interface LineupSnapshotV1 {
   v: 1
   p: string[]
-  pm: 15 | 20
+  pm: number
   f: GeneratedConfig['formation']
   cm: number
   gk: GeneratedConfig['goalkeeperSelections']
@@ -25,6 +27,12 @@ interface LineupSnapshotV2 extends Omit<LineupSnapshotV1, 'v'> {
 
 interface LineupSnapshotV3 extends Omit<LineupSnapshotV1, 'v'> {
   v: 3
+  le?: LiveAdjustmentEvent[]
+}
+
+interface LineupSnapshotV4 extends Omit<LineupSnapshotV1, 'v'> {
+  v: 4
+  pc?: number
   le?: LiveAdjustmentEvent[]
 }
 
@@ -43,14 +51,15 @@ export function encodeLineupSnapshot({
   overrides: Record<string, Record<string, string>>
   liveEvents?: LiveAdjustmentEvent[]
 }) {
-  const payload: LineupSnapshotV3 = {
-    v: 3,
+  const payload: LineupSnapshotV4 = {
+    v: 4,
     p: config.playerNames,
     pm: config.periodMinutes,
     f: config.formation,
     cm: config.chunkMinutes,
     gk: config.goalkeeperSelections,
     s: config.seed,
+    ...(config.periodCount && config.periodCount !== PERIOD_COUNT ? { pc: config.periodCount } : {}),
     ...(Object.keys(overrides).length > 0 ? { o: overrides } : {}),
     ...(liveEvents && liveEvents.length > 0 ? { le: liveEvents } : {}),
   }
@@ -63,19 +72,25 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
     | Partial<LineupSnapshotV1>
     | Partial<LineupSnapshotV2>
     | Partial<LineupSnapshotV3>
+    | Partial<LineupSnapshotV4>
+
+  const periodCount = parsed.v === 4 ? parsed.pc ?? PERIOD_COUNT : PERIOD_COUNT
 
   if (
-    (parsed.v !== 1 && parsed.v !== 2 && parsed.v !== 3) ||
+    (parsed.v !== 1 && parsed.v !== 2 && parsed.v !== 3 && parsed.v !== 4) ||
     !Array.isArray(parsed.p) ||
     parsed.p.length < 8 ||
     parsed.p.length > 12 ||
     !parsed.p.every((name) => typeof name === 'string' && name.trim().length > 0) ||
-    (parsed.pm !== 15 && parsed.pm !== 20) ||
+    !PERIOD_MINUTE_OPTIONS.includes(parsed.pm as (typeof PERIOD_MINUTE_OPTIONS)[number]) ||
     !(parsed.f && parsed.f in FORMATION_PRESETS) ||
     typeof parsed.cm !== 'number' ||
     !isValidChunkMinutes(parsed.cm) ||
+    typeof periodCount !== 'number' ||
+    !Number.isInteger(periodCount) ||
+    !PERIOD_COUNT_OPTIONS.includes(periodCount as (typeof PERIOD_COUNT_OPTIONS)[number]) ||
     !Array.isArray(parsed.gk) ||
-    parsed.gk.length !== PERIOD_COUNT ||
+    parsed.gk.length !== periodCount ||
     !parsed.gk.every((selection) => typeof selection === 'string') ||
     !Number.isInteger(parsed.s)
   ) {
@@ -91,7 +106,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
   }
 
   const playerNames = parsed.p as string[]
-  const periodMinutes = parsed.pm as 15 | 20
+  const periodMinutes = parsed.pm as number
   const formation = parsed.f as GeneratedConfig['formation']
   const chunkMinutes = parsed.cm as number
   const goalkeeperSelections = parsed.gk as GeneratedConfig['goalkeeperSelections']
@@ -101,6 +116,7 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
     config: {
       playerInput: playerNames.join('\n'),
       playerNames,
+      ...(periodCount !== PERIOD_COUNT ? { periodCount } : {}),
       periodMinutes,
       formation,
       chunkMinutes,
@@ -108,12 +124,12 @@ export function decodeLineupSnapshot(encodedSnapshot: string): DecodedLineupSnap
       seed,
     },
     overrides: parsed.o ?? {},
-    liveEvents: parsed.v === 2 || parsed.v === 3 ? parsed.le ?? [] : [],
+    liveEvents: parsed.v === 2 || parsed.v === 3 || parsed.v === 4 ? parsed.le ?? [] : [],
   }
 }
 
 function isValidChunkMinutes(chunkMinutes: number) {
-  return Number.isFinite(chunkMinutes) && chunkMinutes >= 3.75 && chunkMinutes <= 10
+  return Number.isFinite(chunkMinutes) && chunkMinutes > 0
 }
 
 export function buildLineupShareUrl(encodedSnapshot: string, currentUrl: string) {

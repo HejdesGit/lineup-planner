@@ -144,7 +144,8 @@ export interface LiveScenarioInitialConfig {
   attempts: number
   chunkMinutes: number
   formation: FormationKey
-  periodMinutes: 15 | 20
+  periodCount: number
+  periodMinutes: number
   playerCount: number
   playerNames: string[]
   seed: number
@@ -292,6 +293,7 @@ function createScenarioConfig({
   attempts = 1,
   chunkMinutes,
   formation,
+  periodCount = 3,
   periodMinutes,
   playerNames = DEFAULT_PLAYER_NAMES,
   seed,
@@ -299,7 +301,8 @@ function createScenarioConfig({
   attempts?: number
   chunkMinutes: number
   formation: FormationKey
-  periodMinutes: 15 | 20
+  periodCount?: number
+  periodMinutes: number
   playerNames?: string[]
   seed: number
 }): LiveScenarioInitialConfig {
@@ -307,6 +310,7 @@ function createScenarioConfig({
     attempts,
     chunkMinutes,
     formation,
+    periodCount,
     periodMinutes,
     playerCount: playerNames.length,
     playerNames,
@@ -731,6 +735,115 @@ const SCENARIO_PRESETS: ScenarioPreset[] = [
     ],
   },
   {
+    id: 'single-period-five-minute-out',
+    name: 'Temporary-out in 1x5 format',
+    description:
+      'En extremt kort match med en enda period på fem minuter där en spelare måste kliva av mitt i perioden och fairness fortfarande ska hållas rimlig.',
+    config: createScenarioConfig({
+      chunkMinutes: 2.5,
+      formation: '2-3-1',
+      periodCount: 1,
+      periodMinutes: 5,
+      seed: 20260404,
+    }),
+    maxExpectedFairnessDeltaMinutes: 2.5,
+    steps: [
+      {
+        id: 'single-period-out',
+        label: 'En aktiv spelare går ut i period 1 minut 2.',
+        type: 'temporary-out',
+        period: 1,
+        minute: 2,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'two-period-cross-break-return',
+    name: 'Cross-break return in 2x10 format',
+    description:
+      'En spelare går ut sent i period 1 i en 2x10-match och kommer tillbaka tidigt i period 2, vilket testar fairness över kort periodgräns.',
+    config: createScenarioConfig({
+      chunkMinutes: 5,
+      formation: '2-3-1',
+      periodCount: 2,
+      periodMinutes: 10,
+      seed: 20260405,
+    }),
+    steps: [
+      {
+        id: 'two-period-out',
+        label: 'En aktiv spelare går ut i period 1 minut 7.',
+        type: 'temporary-out',
+        period: 1,
+        minute: 7,
+        target: { type: 'first-active-outfielder' },
+      },
+      {
+        id: 'two-period-return',
+        label: 'Spelaren är redo igen i period 2 minut 2.',
+        type: 'return',
+        period: 2,
+        minute: 2,
+        target: { type: 'previous-result', stepId: 'two-period-out', field: 'playerId' },
+      },
+    ],
+  },
+  {
+    id: 'four-period-short-boundary-out',
+    name: 'Boundary out in 4x5 format',
+    description:
+      'En match med fyra korta perioder där en spelare går ut precis före slutet av period 3, så att korta periodgränser och chunk-splittar täcks.',
+    config: createScenarioConfig({
+      chunkMinutes: 2.5,
+      formation: '3-2-1',
+      periodCount: 4,
+      periodMinutes: 5,
+      seed: 20260406,
+    }),
+    steps: [
+      {
+        id: 'four-period-boundary-out',
+        label: 'En aktiv spelare går ut i period 3 minut 4.75.',
+        type: 'temporary-out',
+        period: 3,
+        minute: 4.75,
+        target: { type: 'first-active-outfielder' },
+      },
+    ],
+  },
+  {
+    id: 'four-period-goalkeeper-absence',
+    name: 'Goalkeeper temporary-out in 4x20 format',
+    description:
+      'En längre match med fyra perioder där den aktiva målvakten måste kliva av i period 2 och återkommer först i period 4, vilket testar framtida MV-omfördelning.',
+    config: createScenarioConfig({
+      chunkMinutes: 10,
+      formation: '2-3-1',
+      periodCount: 4,
+      periodMinutes: 20,
+      seed: 20260407,
+    }),
+    steps: [
+      {
+        id: 'goalkeeper-out',
+        label: 'Den aktiva målvakten går ut i period 2 minut 6.',
+        type: 'temporary-out',
+        period: 2,
+        minute: 6,
+        target: { type: 'active-goalkeeper' },
+      },
+      {
+        id: 'goalkeeper-return',
+        label: 'Målvakten är tillbaka i period 4 minut 4.',
+        type: 'return',
+        period: 4,
+        minute: 4,
+        target: { type: 'previous-result', stepId: 'goalkeeper-out', field: 'playerId' },
+      },
+    ],
+  },
+  {
     id: 'position-swap-outfield',
     name: 'Position swap between outfield players',
     description:
@@ -936,7 +1049,7 @@ export function renderLiveScenarioMarkdown(bundle: LiveScenarioArtifactsBundle) 
       '',
       `- Spelare: ${scenario.initialConfig.playerCount}`,
       `- Formation: ${scenario.initialConfig.formation}`,
-      `- Perioder: 3 x ${scenario.initialConfig.periodMinutes} min`,
+      `- Perioder: ${scenario.initialConfig.periodCount} x ${scenario.initialConfig.periodMinutes} min`,
       `- Byteblock: ${formatMinuteQuantity(scenario.initialConfig.chunkMinutes)} min`,
       `- Seed: ${scenario.initialConfig.seed}`,
       '',
@@ -1010,6 +1123,7 @@ function createScenarioState(config: LiveScenarioInitialConfig): ScenarioState {
     attempts: config.attempts,
     chunkMinutes: config.chunkMinutes,
     formation: config.formation,
+    periodCount: config.periodCount,
     periodMinutes: config.periodMinutes,
     players,
     seed: config.seed,
@@ -1354,9 +1468,10 @@ function finalizeScenarioReport(preset: ScenarioPreset, state: ScenarioState): L
   const totalFairnessTargetMinutes = roundMinuteValue(
     Object.values(state.plan.fairnessTargets).reduce((total, target) => total + target, 0),
   )
-  const expectedTotalMinutes = state.plan.periodMinutes * 3 * (state.plan.positions.length + 1)
+  const periodCount = state.plan.periods.length
+  const expectedTotalMinutes = state.plan.periodMinutes * periodCount * (state.plan.positions.length + 1)
   const expectedBenchMinutes =
-    state.plan.periodMinutes * 3 * state.plan.summaries.length - expectedTotalMinutes
+    state.plan.periodMinutes * periodCount * state.plan.summaries.length - expectedTotalMinutes
   const players = state.plan.summaries
     .map((summary) => {
       const fairnessTargetMinutes = state.plan.fairnessTargets[summary.playerId]
@@ -1506,7 +1621,7 @@ function buildAiValidationInput(report: Omit<LiveScenarioReport, 'ai'>): AiValid
     '',
     `Scenario: ${report.name} (${report.id})`,
     `Beskrivning: ${report.description}`,
-    `Matchkonfiguration: ${report.initialConfig.playerCount} spelare, formation ${report.initialConfig.formation}, 3 x ${report.initialConfig.periodMinutes} min, chunk ${formatMinuteQuantity(report.initialConfig.chunkMinutes)} min, seed ${report.initialConfig.seed}.`,
+    `Matchkonfiguration: ${report.initialConfig.playerCount} spelare, formation ${report.initialConfig.formation}, ${report.initialConfig.periodCount} x ${report.initialConfig.periodMinutes} min, chunk ${formatMinuteQuantity(report.initialConfig.chunkMinutes)} min, seed ${report.initialConfig.seed}.`,
     `Chunk-semantik: ${CHUNK_SEMANTICS_DESCRIPTION}`,
     `Boundary-händelser: ${boundaryEventSummary}`,
     `Målvakts-penalty: ${goalkeeperPenaltySummary}`,

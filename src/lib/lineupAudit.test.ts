@@ -15,13 +15,14 @@ describe('createAuditScenarios', () => {
   it('builds the full default UI matrix with stable scenario ids', () => {
     const scenarios = createAuditScenarios()
 
-    expect(scenarios).toHaveLength(480)
+    expect(scenarios).toHaveLength(3840)
     expect(scenarios[0]?.scenarioId).toBe(
-      'players-8_period-15_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
+      'players-8_periods-1_period-5_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
     )
     expect(
       buildScenarioId({
         playerCount: 10,
+        periodCount: 3,
         periodMinutes: 20,
         formation: '2-3-1',
         substitutionsPerPeriod: 3,
@@ -29,12 +30,15 @@ describe('createAuditScenarios', () => {
         rosterOrder: 'canonical',
         liveAdjustmentPattern: 'none',
       }),
-    ).toBe('players-10_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none')
+    ).toBe(
+      'players-10_periods-3_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none',
+    )
   })
 
   it('adds live adjustment patterns as an extra matrix dimension when requested', () => {
     const scenarios = createAuditScenarios({
       playerCounts: [10],
+      periodCounts: [3],
       periodMinutes: [20],
       formations: ['2-3-1'],
       substitutions: [2],
@@ -45,8 +49,8 @@ describe('createAuditScenarios', () => {
 
     expect(scenarios).toHaveLength(2)
     expect(scenarios.map((scenario) => scenario.scenarioId)).toEqual([
-      'players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
-      'players-10_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-quick-return',
+      'players-10_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
+      'players-10_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-quick-return',
     ])
   })
 })
@@ -55,14 +59,18 @@ describe('resolveLockedGoalkeeperIds', () => {
   it('maps deterministic goalkeeper modes to expected players', () => {
     const players = createNamedPlayers(8)
 
-    expect(resolveLockedGoalkeeperIds(players, 'auto')).toEqual([null, null, null])
-    expect(resolveLockedGoalkeeperIds(players, 'lock-period-1')).toEqual([players[0].id, null, null])
-    expect(resolveLockedGoalkeeperIds(players, 'lock-period-1-and-3')).toEqual([
+    expect(resolveLockedGoalkeeperIds(players, 'auto', 3)).toEqual([null, null, null])
+    expect(resolveLockedGoalkeeperIds(players, 'lock-period-1', 3)).toEqual([
+      players[0].id,
+      null,
+      null,
+    ])
+    expect(resolveLockedGoalkeeperIds(players, 'lock-period-1-and-last', 3)).toEqual([
       players[0].id,
       null,
       players[2].id,
     ])
-    expect(resolveLockedGoalkeeperIds(players, 'lock-all-3')).toEqual([
+    expect(resolveLockedGoalkeeperIds(players, 'lock-all-periods', 3)).toEqual([
       players[0].id,
       players[1].id,
       players[2].id,
@@ -115,6 +123,7 @@ describe('analyzeMatchPlan', () => {
     const chunkMinutes = getChunkMinutesForSubstitutions(20, 3)
     const plan = generateMatchPlan({
       players,
+      periodCount: 3,
       periodMinutes: 20,
       formation: '2-3-1',
       chunkMinutes,
@@ -137,6 +146,7 @@ describe('analyzeMatchPlan', () => {
     const players = createNamedPlayers(11)
     const plan = generateMatchPlan({
       players,
+      periodCount: 3,
       periodMinutes: 20,
       formation: '2-3-1',
       chunkMinutes: 10,
@@ -162,8 +172,10 @@ describe('createAuditRecord', () => {
   it('does not flag structurally expected isolated play blocks for the 11-player baseline case', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-11_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
+        scenarioId:
+          'players-11_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
         playerCount: 11,
+        periodCount: 3,
         periodMinutes: 20,
         formation: '2-3-1',
         substitutionsPerPeriod: 2,
@@ -184,8 +196,10 @@ describe('createAuditRecord', () => {
   it('does not flag the 9-player high-rotation case after the short-window continuity rebalance', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-9_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
+        scenarioId:
+          'players-9_periods-3_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
         playerCount: 9,
+        periodCount: 3,
         periodMinutes: 15,
         formation: '2-3-1',
         substitutionsPerPeriod: 4,
@@ -206,8 +220,10 @@ describe('createAuditRecord', () => {
   it('does not flag the 10-player high-rotation case after the short-window continuity rebalance', () => {
     const record = createAuditRecord(
       {
-        scenarioId: 'players-10_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
+        scenarioId:
+          'players-10_periods-3_period-15_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
         playerCount: 10,
+        periodCount: 3,
         periodMinutes: 15,
         formation: '2-3-1',
         substitutionsPerPeriod: 4,
@@ -273,13 +289,15 @@ describe('createAuditRecord', () => {
       formation: '2-3-1' as const,
       seed: 7,
       expectedPlayer: 'Henry',
-      scenarioId: 'players-12_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none',
+      scenarioId:
+        'players-12_periods-3_period-20_formation-2-3-1_subs-3_gk-auto_roster-canonical_live-none',
     },
     {
       formation: '3-2-1' as const,
       seed: 42,
       expectedPlayer: 'Joar',
-      scenarioId: 'players-12_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
+      scenarioId:
+        'players-12_periods-3_period-20_formation-3-2-1_subs-3_gk-auto_roster-canonical_live-none',
     },
   ])(
     'keeps materially fragmented 12-player three-sub cases hard-flagged for $scenarioId',
@@ -404,7 +422,7 @@ describe('createAuditRecord', () => {
       {
         ...createLiveScenario('double-temporary-out'),
         scenarioId:
-          'players-8_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-double-temporary-out',
+          'players-8_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-double-temporary-out',
         playerCount: 8,
         rosterNames: [],
       },
@@ -435,6 +453,7 @@ function createLiveScenario(
   return {
     scenarioId: buildScenarioId({
       playerCount: 10,
+      periodCount: 3,
       periodMinutes: 20,
       formation: '2-3-1',
       substitutionsPerPeriod: 2,
@@ -443,6 +462,7 @@ function createLiveScenario(
       liveAdjustmentPattern,
     }),
     playerCount: 10,
+    periodCount: 3,
     periodMinutes: 20 as const,
     formation: '2-3-1' as const,
     substitutionsPerPeriod: 2 as const,
@@ -456,18 +476,21 @@ function createLiveScenario(
 
 function createStandardScenario({
   playerCount,
+  periodCount = 3,
   periodMinutes,
   formation,
   substitutionsPerPeriod,
 }: {
   playerCount: number
-  periodMinutes: 15 | 20
+  periodCount?: number
+  periodMinutes: number
   formation: '2-3-1' | '3-2-1'
   substitutionsPerPeriod: 2 | 3 | 4
 }) {
   return {
     scenarioId: buildScenarioId({
       playerCount,
+      periodCount,
       periodMinutes,
       formation,
       substitutionsPerPeriod,
@@ -476,6 +499,7 @@ function createStandardScenario({
       liveAdjustmentPattern: 'none',
     }),
     playerCount,
+    periodCount,
     periodMinutes,
     formation,
     substitutionsPerPeriod,
