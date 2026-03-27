@@ -88,6 +88,22 @@ interface CandidatePlan {
   goalkeepers: string[]
 }
 
+interface EvaluatedCandidatePlan {
+  score: number
+}
+
+interface SchedulerContext {
+  positions: readonly OutfieldPosition[]
+  normalizedLockedGoalkeepers: Array<string | null>
+  matchChunks: MatchChunk[]
+  chunksByPeriod: MatchChunk[][]
+  policy: SchedulingPolicy
+  totalPlayerMinutes: number
+  playerIds: string[]
+  playerOrderById: Record<string, number>
+  nameById: Record<string, string>
+}
+
 export type ScoringProfileName = 'legacy' | 'normalized'
 
 export interface ScoreComponents {
@@ -264,19 +280,27 @@ export function generateMatchPlan({
 }: MatchConfig): MatchPlan {
   validateConfig(players, periodCount, periodMinutes, formation, chunkMinutes, lockedGoalkeeperIds)
   const resolvedAttempts = resolveAttemptCount({ players, periodCount, periodMinutes, chunkMinutes, attempts })
+  const context = buildSchedulerContext(
+    players,
+    periodCount,
+    periodMinutes,
+    formation,
+    chunkMinutes,
+    lockedGoalkeeperIds,
+  )
 
-  let best: CandidatePlan | null = null
+  let best: EvaluatedCandidatePlan | null = null
   let bestSeed = seed
 
   for (let index = 0; index < resolvedAttempts; index += 1) {
     const candidateSeed = (seed + index * 7919) >>> 0
-    const candidate = buildCandidatePlan(
+    const candidate = evaluateCandidatePlan(
+      context,
       players,
       periodCount,
       periodMinutes,
       formation,
       chunkMinutes,
-      lockedGoalkeeperIds,
       candidateSeed,
     )
     if (!candidate) {
@@ -293,20 +317,73 @@ export function generateMatchPlan({
     throw new Error('Kunde inte skapa ett giltigt matchschema.')
   }
 
+  const winningCandidate = buildCandidatePlan(
+    context,
+    players,
+    periodCount,
+    periodMinutes,
+    formation,
+    chunkMinutes,
+    bestSeed,
+  )
+
+  if (!winningCandidate) {
+    throw new Error('Kunde inte återskapa vinnande matchschema.')
+  }
+
   return {
     seed: bestSeed,
-    score: best.score,
+    score: winningCandidate.score,
     periodCount,
     formation,
     chunkMinutes,
     periodMinutes,
-    positions: FORMATION_PRESETS[formation].positions,
-    goalkeepers: best.goalkeepers,
-    lockedGoalkeepers: normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount),
-    targets: best.targets,
-    fairnessTargets: best.fairnessTargets,
-    periods: best.periods,
-    summaries: best.summaries,
+    positions: context.positions,
+    goalkeepers: winningCandidate.goalkeepers,
+    lockedGoalkeepers: context.normalizedLockedGoalkeepers,
+    targets: winningCandidate.targets,
+    fairnessTargets: winningCandidate.fairnessTargets,
+    periods: winningCandidate.periods,
+    summaries: winningCandidate.summaries,
+  }
+}
+
+function buildSchedulerContext(
+  players: Player[],
+  periodCount: number,
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
+  lockedGoalkeeperIds: Array<string | null> | undefined,
+): SchedulerContext {
+  const positions = FORMATION_PRESETS[formation].positions
+  const normalizedLockedGoalkeepers = normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount)
+  const matchChunks = buildMatchChunks(periodCount, periodMinutes, chunkMinutes)
+  const chunksByPeriod = Array.from({ length: periodCount }, () => [] as MatchChunk[])
+
+  for (const chunk of matchChunks) {
+    chunksByPeriod[chunk.periodIndex]?.push(chunk)
+  }
+
+  const playerIds = players.map((player) => player.id)
+
+  return {
+    positions,
+    normalizedLockedGoalkeepers,
+    matchChunks,
+    chunksByPeriod,
+    policy: resolveSchedulingPolicy({
+      periodCount,
+      chunkCount: matchChunks.length,
+      benchSlots: Math.max(players.length - 7, 0),
+    }),
+    totalPlayerMinutes: periodCount * periodMinutes * 7,
+    playerIds,
+    playerOrderById: Object.fromEntries(playerIds.map((id, index) => [id, index])) as Record<
+      string,
+      number
+    >,
+    nameById: Object.fromEntries(players.map((player) => [player.id, player.name])),
   }
 }
 
@@ -364,75 +441,131 @@ function validateConfig(
   }
 }
 
-function buildCandidatePlan(
+function evaluateCandidatePlan(
+  context: SchedulerContext,
   players: Player[],
   periodCount: number,
   periodMinutes: number,
   formation: FormationKey,
   chunkMinutes: number,
-  lockedGoalkeeperIds: Array<string | null> | undefined,
+  seed: number,
+): EvaluatedCandidatePlan | null {
+  return runCandidatePlan(
+    context,
+    players,
+    periodCount,
+    periodMinutes,
+    formation,
+    chunkMinutes,
+    seed,
+    false,
+  )
+}
+
+function buildCandidatePlan(
+  context: SchedulerContext,
+  players: Player[],
+  periodCount: number,
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
   seed: number,
 ): CandidatePlan | null {
-  const rng = createRng(seed)
-  const positions = FORMATION_PRESETS[formation].positions
-  const matchChunks = buildMatchChunks(periodCount, periodMinutes, chunkMinutes)
-  const policy = resolveSchedulingPolicy({
+  return runCandidatePlan(
+    context,
+    players,
     periodCount,
-    chunkCount: matchChunks.length,
-    benchSlots: Math.max(players.length - 7, 0),
-  })
-  const totalPlayerMinutes = periodCount * periodMinutes * 7
-  const playerIds = players.map((player) => player.id)
-  const playerOrderById = Object.fromEntries(playerIds.map((id, index) => [id, index])) as Record<
-    string,
-    number
-  >
-  const nameById = Object.fromEntries(players.map((player) => [player.id, player.name]))
-  const targets = distributeTargetMinutes(playerIds, totalPlayerMinutes, rng)
+    periodMinutes,
+    formation,
+    chunkMinutes,
+    seed,
+    true,
+  )
+}
+
+function runCandidatePlan(
+  context: SchedulerContext,
+  players: Player[],
+  periodCount: number,
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
+  seed: number,
+  includeOutput: true,
+): CandidatePlan | null
+function runCandidatePlan(
+  context: SchedulerContext,
+  players: Player[],
+  periodCount: number,
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
+  seed: number,
+  includeOutput: false,
+): EvaluatedCandidatePlan | null
+function runCandidatePlan(
+  context: SchedulerContext,
+  players: Player[],
+  periodCount: number,
+  periodMinutes: number,
+  formation: FormationKey,
+  chunkMinutes: number,
+  seed: number,
+  includeOutput: boolean,
+): CandidatePlan | EvaluatedCandidatePlan | null {
+  const rng = createRng(seed)
+  const targets = distributeTargetMinutes(context.playerIds, context.totalPlayerMinutes, rng)
   const goalkeepers = resolveGoalkeepers(
-    playerIds,
-    normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount),
+    context.playerIds,
+    context.normalizedLockedGoalkeepers,
     periodCount,
     rng,
   )
   const fairnessTargets = buildGoalkeeperFairnessTargets({
-    playerIds,
+    playerIds: context.playerIds,
     goalkeepers,
     periodCount,
     periodMinutes,
     chunkMinutes,
-    outfieldSlotCount: positions.length,
-    playerOrderById,
+    outfieldSlotCount: context.positions.length,
+    playerOrderById: context.playerOrderById,
     fallbackTargets: targets,
   })
-  const goalkeeperMinuteCounts = buildGoalkeeperMinuteCounts(playerIds, goalkeepers, periodMinutes)
+  const goalkeeperMinuteCounts = buildGoalkeeperMinuteCounts(context.playerIds, goalkeepers, periodMinutes)
 
   const outfieldTargets = Object.fromEntries(
-    playerIds.map((id) => [id, Math.max(0, fairnessTargets[id] - goalkeeperMinuteCounts[id])]),
+    context.playerIds.map((id) => [id, Math.max(0, fairnessTargets[id] - goalkeeperMinuteCounts[id])]),
   ) as Record<string, number>
-  const remainingEligibleByPlayer = buildRemainingEligibleLookup(playerIds, matchChunks, goalkeepers)
+  const remainingEligibleByPlayer = buildRemainingEligibleLookup(
+    context.playerIds,
+    context.matchChunks,
+    goalkeepers,
+  )
   const histories = createHistories(players, goalkeepers)
   const periods: PeriodPlan[] = []
+  let previousStarterIds: Set<string> | null = null
+  let previousBenchIds: Set<string> | null = null
+  let periodStartVariationPenalty = 0
 
   for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     const goalkeeperId = goalkeepers[periodIndex]
-    const chunks = []
+    const chunks = includeOutput ? [] : null
     const substituteSet = new Set<string>()
-    const periodChunks = matchChunks.filter((chunk) => chunk.periodIndex === periodIndex)
+    const periodChunks = context.chunksByPeriod[periodIndex] ?? []
     let previousLineup: Lineup | null = null
 
     for (const chunk of periodChunks) {
       const phase: RotationPhase = chunk.windowIndex === 0 ? 'period-start' : 'in-period'
       const outfieldPlayers = selectOutfieldPlayers({
         chunk,
-        playerIds,
+        playerIds: context.playerIds,
         goalkeeperId,
         histories,
         outfieldTargets,
         remainingEligibleByPlayer,
-        positions,
+        positions: context.positions,
         phase,
-        policy,
+        policy: context.policy,
         rng,
       })
 
@@ -443,15 +576,24 @@ function buildCandidatePlan(
       const assignmentResult: AssignmentResult =
         phase === 'period-start' || !previousLineup
           ? {
-              lineup: assignBestPositions(outfieldPlayers, positions, histories, phase),
+              lineup: assignBestPositions(outfieldPlayers, context.positions, histories, phase),
               substitutions: [],
             }
-          : assignInPeriodLineup(outfieldPlayers, previousLineup, positions, histories, playerOrderById)
+          : assignInPeriodLineup(
+              outfieldPlayers,
+              previousLineup,
+              context.positions,
+              histories,
+              context.playerOrderById,
+            )
       const assignment = assignmentResult.lineup
-      const activePlayerIds = [goalkeeperId, ...positions.map((position) => getLineupPlayer(assignment, position))]
+      const activePlayerIds = [
+        goalkeeperId,
+        ...context.positions.map((position) => getLineupPlayer(assignment, position)),
+      ]
       const activeSet = new Set(activePlayerIds)
 
-      for (const playerId of playerIds) {
+      for (const playerId of context.playerIds) {
         const history = histories[playerId]
         const isActive = activeSet.has(playerId)
         const nextState = isActive ? 'active' : 'bench'
@@ -484,10 +626,29 @@ function buildCandidatePlan(
       }
 
       if (phase === 'period-start') {
-        updatePeriodStartHistory(playerIds, goalkeeperId, activeSet, positions, assignment, histories)
+        updatePeriodStartHistory(
+          context.playerIds,
+          goalkeeperId,
+          activeSet,
+          context.positions,
+          assignment,
+          histories,
+        )
+        const starterIds = new Set(
+          context.positions.map((position) => getLineupPlayer(assignment, position)),
+        )
+        const benchIds = new Set(context.playerIds.filter((playerId) => !activeSet.has(playerId)))
+
+        if (previousStarterIds && previousBenchIds) {
+          periodStartVariationPenalty += countIntersection(previousStarterIds, starterIds) * 18
+          periodStartVariationPenalty += countIntersection(previousBenchIds, benchIds) * 22
+        }
+
+        previousStarterIds = starterIds
+        previousBenchIds = benchIds
       }
 
-      for (const position of positions) {
+      for (const position of context.positions) {
         const playerId = getLineupPlayer(assignment, position)
         const history = histories[playerId]
         const group = getRoleGroup(position)
@@ -508,42 +669,58 @@ function buildCandidatePlan(
         history.groupsPlayed.add(group)
       }
 
-      chunks.push({
-        chunkIndex: chunk.chunkIndex,
-        period: periodIndex + 1,
-        windowIndex: chunk.windowIndex,
-        startMinute: chunk.startMinute,
-        endMinute: chunk.endMinute,
-        durationMinutes: chunk.durationMinutes,
-        goalkeeperId,
-        goalkeeperName: nameById[goalkeeperId],
-        lineup: assignment,
-        activePlayerIds,
-        substitutes: playerIds
-          .filter((playerId) => !activeSet.has(playerId))
-          .map((playerId) => nameById[playerId]),
-        substitutions: assignmentResult.substitutions,
-      })
+      if (chunks) {
+        chunks.push({
+          chunkIndex: chunk.chunkIndex,
+          period: periodIndex + 1,
+          windowIndex: chunk.windowIndex,
+          startMinute: chunk.startMinute,
+          endMinute: chunk.endMinute,
+          durationMinutes: chunk.durationMinutes,
+          goalkeeperId,
+          goalkeeperName: context.nameById[goalkeeperId],
+          lineup: assignment,
+          activePlayerIds,
+          substitutes: context.playerIds
+            .filter((playerId) => !activeSet.has(playerId))
+            .map((playerId) => context.nameById[playerId]),
+          substitutions: assignmentResult.substitutions,
+        })
+      }
 
       previousLineup = assignment
     }
 
-    periods.push({
-      period: periodIndex + 1,
-      formation,
-      positions,
-      goalkeeperId,
-      goalkeeperName: nameById[goalkeeperId],
-      startingLineup: chunks[0].lineup,
-      chunks,
-      substitutes: Array.from(substituteSet).map((playerId) => nameById[playerId]),
-    })
+    if (chunks) {
+      periods.push({
+        period: periodIndex + 1,
+        formation,
+        positions: context.positions,
+        goalkeeperId,
+        goalkeeperName: context.nameById[goalkeeperId],
+        startingLineup: chunks[0].lineup,
+        chunks,
+        substitutes: Array.from(substituteSet).map((playerId) => context.nameById[playerId]),
+      })
+    }
   }
 
   for (const history of Object.values(histories)) {
     if (history.playStreak === 1) {
       history.shortPlayBlocks += 1
     }
+  }
+
+  const scoreComponents = buildScoreComponentsFromState(
+    fairnessTargets,
+    histories,
+    players.length,
+    periodStartVariationPenalty,
+  )
+  const score = scoreComponentsToTotal(scoreComponents, ACTIVE_SCORING_PROFILE.name).totalScore
+
+  if (!includeOutput) {
+    return { score }
   }
 
   const summaries = players.map((player) => {
@@ -561,10 +738,8 @@ function buildCandidatePlan(
     }
   })
 
-  const scoreComponents = buildScoreComponents(fairnessTargets, histories, periods, players.length)
-
   return {
-    score: scoreComponentsToTotal(scoreComponents, ACTIVE_SCORING_PROFILE.name).totalScore,
+    score,
     periods,
     summaries,
     targets,
@@ -1135,6 +1310,15 @@ function assignBestPositions(
   histories: Record<string, PlayerHistory>,
   phase: RotationPhase,
 ): Lineup {
+  const costMatrixByPlayerId = Object.fromEntries(
+    selectedPlayerIds.map((playerId) => {
+      const snapshot = buildRotationSnapshot(histories[playerId], phase)
+      return [
+        playerId,
+        positions.map((position) => scoreOutfieldPosition(snapshot, position, phase)),
+      ]
+    }),
+  ) as Record<string, number[]>
   let bestCost = Number.POSITIVE_INFINITY
   let bestAssignment: Lineup = Object.fromEntries(
     positions.map((position, index) => [position, selectedPlayerIds[index] ?? selectedPlayerIds[0]]),
@@ -1145,13 +1329,7 @@ function assignBestPositions(
 
     for (let index = 0; index < positions.length; index += 1) {
       const playerId = permutation[index]
-      const position = positions[index]
-      const snapshot = buildRotationSnapshot(histories[playerId], phase)
-      cost += scoreOutfieldPosition(
-        snapshot,
-        position,
-        phase,
-      )
+      cost += costMatrixByPlayerId[playerId]?.[index] ?? 0
     }
 
     if (cost < bestCost) {
@@ -1195,15 +1373,24 @@ function assignInPeriodLineup(
 
   let bestCost = Number.POSITIVE_INFINITY
   let bestIncomingOrder = [...incomingPlayerIds]
+  const incomingCostMatrixByPlayerId = Object.fromEntries(
+    incomingPlayerIds.map((playerId) => {
+      const snapshot = buildRotationSnapshot(histories[playerId], 'in-period')
+      return [
+        playerId,
+        outgoingAssignments.map((assignment) =>
+          scoreOutfieldPosition(snapshot, assignment.position, 'in-period'),
+        ),
+      ]
+    }),
+  ) as Record<string, number[]>
 
   forEachPermutation(incomingPlayerIds, (permutation) => {
     let cost = 0
 
     for (let index = 0; index < outgoingAssignments.length; index += 1) {
       const incomingPlayerId = permutation[index]
-      const outgoingAssignment = outgoingAssignments[index]
-      const snapshot = buildRotationSnapshot(histories[incomingPlayerId], 'in-period')
-      cost += scoreOutfieldPosition(snapshot, outgoingAssignment.position, 'in-period')
+      cost += incomingCostMatrixByPlayerId[incomingPlayerId]?.[index] ?? 0
     }
 
     if (cost < bestCost) {
@@ -1355,6 +1542,20 @@ function buildScoreComponents(
   periods: PeriodPlan[],
   playerCount: number,
 ) {
+  return buildScoreComponentsFromState(
+    targets,
+    histories,
+    playerCount,
+    scorePeriodStartVariation(periods),
+  )
+}
+
+function buildScoreComponentsFromState(
+  targets: Record<string, number>,
+  histories: Record<string, PlayerHistory>,
+  playerCount: number,
+  periodStartVariationPenalty: number,
+) {
   const benchSlots = Math.max(playerCount - 7, 0)
   const allowedTransitions = 2 + Math.max(benchSlots - 1, 0)
   const allowedShortPlayBlocks = Math.max(benchSlots - 2, 0)
@@ -1417,7 +1618,6 @@ function buildScoreComponents(
 
     return total
   }, 0)
-  const periodStartVariationPenalty = scorePeriodStartVariation(periods)
 
   return {
     playerCount,
@@ -1777,12 +1977,12 @@ function shuffle<T>(items: T[], rng: () => number) {
   return items
 }
 
-function forEachPermutation<T>(items: T[], callback: (permutation: T[]) => void) {
+function forEachPermutation<T>(items: T[], callback: (permutation: readonly T[]) => void) {
   const values = [...items]
 
   const visit = (startIndex: number) => {
     if (startIndex === values.length - 1) {
-      callback([...values])
+      callback(values)
       return
     }
 
