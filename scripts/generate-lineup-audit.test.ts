@@ -92,6 +92,49 @@ describe('generate-lineup-audit CLI', () => {
     expect(existsSync(seedSevenPath)).toBe(false)
   })
 
+  it('exports the repeated-manual-goalkeeper audit mode without duplicate-goalkeeper failures', () => {
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'lineup-audit-'))
+    tempDirs.push(outDir)
+
+    execFileSync(process.execPath, [
+      tsxCliPath,
+      path.join(repoRoot, 'scripts', 'generate-lineup-audit.ts'),
+      `--outDir=${outDir}`,
+      '--playerCounts=9',
+      '--periodCounts=3',
+      '--periodMinutes=15',
+      '--formations=2-3-1',
+      '--substitutions=2',
+      '--goalkeeperModes=lock-same-goalkeeper-all-periods',
+      '--rosterOrders=canonical',
+      '--seeds=1',
+    ], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    })
+
+    const scenarioId =
+      'players-9_periods-3_period-15_formation-2-3-1_subs-2_gk-lock-same-goalkeeper-all-periods_roster-canonical_live-none'
+    const index = readJson<{ scenarioCount: number; filters: { goalkeeperModes: string[] } }>(
+      path.join(outDir, 'index.json'),
+    )
+    const seed = readJson<{
+      input: { lockedGoalkeeperIds: Array<string | null> }
+      plan: { goalkeepers: string[] }
+      validations: { lockedGoalkeepersRespected: boolean }
+      flags: string[]
+    }>(path.join(outDir, 'scenarios', scenarioId, 'seed-1.json'))
+
+    expect(index.scenarioCount).toBe(1)
+    expect(index.filters.goalkeeperModes).toEqual(['lock-same-goalkeeper-all-periods'])
+    expect(seed.input.lockedGoalkeeperIds).toHaveLength(3)
+    expect(new Set(seed.input.lockedGoalkeeperIds.filter(Boolean)).size).toBe(1)
+    expect(seed.plan.goalkeepers).toEqual(seed.input.lockedGoalkeeperIds)
+    expect(seed.validations.lockedGoalkeepersRespected).toBe(true)
+    expect(seed.flags).not.toContain('duplicate-goalkeepers')
+    expect(seed.flags).not.toContain('goalkeeper-lock-mismatch')
+  })
+
   it('keeps dense four-sub isolated-block cases visible in seed metrics without counting them as hard-flagged exports', () => {
     const outDir = mkdtempSync(path.join(os.tmpdir(), 'lineup-audit-'))
     tempDirs.push(outDir)

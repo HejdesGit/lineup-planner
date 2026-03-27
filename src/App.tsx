@@ -898,6 +898,7 @@ function SettingsPanel({
 }) {
   const showChunkRecommendation = rosterCount >= 10 && getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes) <= 2
   const substitutionOptions = getSubstitutionOptions(state.periodMinutes, state.chunkMinutes)
+  const hasRepeatedManualGoalkeeper = hasRepeatedManualGoalkeeperSelection(state.goalkeeperSelections)
 
   return (
     <section className="rounded-[1.5rem] border border-clay-300/20 bg-black/20 p-4 sm:rounded-[1.75rem] sm:p-5">
@@ -1069,6 +1070,17 @@ function SettingsPanel({
             </Field>
           ))}
         </div>
+        {hasRepeatedManualGoalkeeper ? (
+          <div className="rounded-[1.25rem] border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-100/80">
+              Målvaktsvarning
+            </p>
+            <p className="mt-1">
+              Samma målvakt är vald i flera perioder. Det är tillåtet, men kan ge ojämn speltid och
+              fler analysflaggor.
+            </p>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <button
@@ -3582,6 +3594,12 @@ function formatMinuteQuantity(value: number) {
   }
 
   return value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function hasRepeatedManualGoalkeeperSelection(selections: GoalkeeperSelections) {
+  const manualSelections = selections.filter((selection) => selection.trim().length > 0)
+
+  return new Set(manualSelections).size !== manualSelections.length
 }
 
 function roundMinuteValue(value: number) {

@@ -31,6 +31,7 @@ export const DEFAULT_AUDIT_GOALKEEPER_MODES = [
   'lock-period-1',
   'lock-period-1-and-last',
   'lock-all-periods',
+  'lock-same-goalkeeper-all-periods',
 ] as const
 export const DEFAULT_AUDIT_ROSTER_ORDERS = ['canonical', 'reversed'] as const
 export const ALL_AUDIT_LIVE_PATTERNS = [
@@ -62,7 +63,6 @@ export type AuditFlag =
   | 'consecutive-bench'
   | 'goalkeeper-lock-mismatch'
   | 'summary-minutes-mismatch'
-  | 'duplicate-goalkeepers'
   | 'score-mismatch'
   | 'isolated-play-blocks'
   | 'unavailable-player-leak'
@@ -148,7 +148,6 @@ export interface AuditValidations {
   benchSpreadWithinLimit: boolean
   lockedGoalkeepersRespected: boolean
   summaryMinutesConsistent: boolean
-  uniqueGoalkeepersPerPeriod: boolean
   noConsecutiveBenchWindows: boolean
   noUnavailableLeaks: boolean
   liveFairnessWithinTolerance: boolean
@@ -360,6 +359,8 @@ export function resolveLockedGoalkeeperIds(
       return ids
     case 'lock-all-periods':
       return ids.map((_, index) => players[index]?.id ?? null)
+    case 'lock-same-goalkeeper-all-periods':
+      return ids.map(() => players[0]?.id ?? null)
   }
 }
 
@@ -614,7 +615,6 @@ export function analyzeMatchPlan(
       benchSpreadWithinLimit: benchMinuteSpread <= maxAllowedMinuteSpread + MINUTE_TOLERANCE,
       lockedGoalkeepersRespected,
       summaryMinutesConsistent,
-      uniqueGoalkeepersPerPeriod: new Set(plan.goalkeepers).size === plan.goalkeepers.length,
       noConsecutiveBenchWindows: playersWithExcessConsecutiveBenchWindows.length === 0,
       noUnavailableLeaks: true,
       liveFairnessWithinTolerance: true,
@@ -827,9 +827,6 @@ function buildFlags(record: GeneratedAuditRecord, validations: AuditValidations)
   }
   if (!validations.summaryMinutesConsistent) {
     flags.push('summary-minutes-mismatch')
-  }
-  if (!validations.uniqueGoalkeepersPerPeriod) {
-    flags.push('duplicate-goalkeepers')
   }
   if (!validations.normalizedScoreMatchesPlan) {
     flags.push('score-mismatch')

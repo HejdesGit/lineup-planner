@@ -15,7 +15,7 @@ describe('createAuditScenarios', () => {
   it('builds the full default UI matrix with stable scenario ids', () => {
     const scenarios = createAuditScenarios()
 
-    expect(scenarios).toHaveLength(3840)
+    expect(scenarios).toHaveLength(4800)
     expect(scenarios[0]?.scenarioId).toBe(
       'players-8_periods-1_period-5_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
     )
@@ -74,6 +74,11 @@ describe('resolveLockedGoalkeeperIds', () => {
       players[0].id,
       players[1].id,
       players[2].id,
+    ])
+    expect(resolveLockedGoalkeeperIds(players, 'lock-same-goalkeeper-all-periods', 3)).toEqual([
+      players[0].id,
+      players[0].id,
+      players[0].id,
     ])
   })
 })
@@ -191,9 +196,64 @@ describe('analyzeMatchPlan', () => {
     expect(analysis.derivedMetrics.playersWithExcessConsecutiveBenchWindows).toEqual([])
     expect(analysis.validations.noConsecutiveBenchWindows).toBe(true)
   })
+
+  it('accepts repeated manually locked goalkeepers without flagging them as invalid analysis', () => {
+    const players = createNamedPlayers(9)
+    const lockedGoalkeeperIds = [players[0].id, players[0].id, players[0].id]
+    const plan = generateMatchPlan({
+      players,
+      periodCount: 3,
+      periodMinutes: 15,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds,
+      seed: 91,
+      attempts: 24,
+    })
+    const analysis = analyzeMatchPlan(plan, {
+      playerCount: 9,
+      chunkMinutes: 5,
+      lockedGoalkeeperIds,
+    })
+
+    expect(plan.goalkeepers).toEqual(lockedGoalkeeperIds)
+    expect(analysis.validations.lockedGoalkeepersRespected).toBe(true)
+    expect(analysis.validations.summaryMinutesConsistent).toBe(true)
+    expect('uniqueGoalkeepersPerPeriod' in analysis.validations).toBe(false)
+  })
 })
 
 describe('createAuditRecord', () => {
+  it('covers a repeated manual goalkeeper audit mode without creating false duplicate flags', () => {
+    const record = createAuditRecord(
+      {
+        scenarioId:
+          'players-9_periods-3_period-15_formation-2-3-1_subs-2_gk-lock-same-goalkeeper-all-periods_roster-canonical_live-none',
+        playerCount: 9,
+        periodCount: 3,
+        periodMinutes: 15,
+        formation: '2-3-1',
+        substitutionsPerPeriod: 2,
+        chunkMinutes: 7.5,
+        goalkeeperMode: 'lock-same-goalkeeper-all-periods',
+        rosterOrder: 'canonical',
+        rosterNames: [],
+        liveAdjustmentPattern: 'none',
+      },
+      1,
+    )
+
+    expect(record.input.lockedGoalkeeperIds).toEqual([
+      record.input.players[0].id,
+      record.input.players[0].id,
+      record.input.players[0].id,
+    ])
+    expect(record.plan.goalkeepers).toEqual(record.input.lockedGoalkeeperIds)
+    expect(record.validations.lockedGoalkeepersRespected).toBe(true)
+    expect(record.flags).not.toContain('goalkeeper-lock-mismatch')
+    expect(record.flags).not.toContain('duplicate-goalkeepers')
+  })
+
   it('does not flag structurally expected isolated play blocks for the 11-player baseline case', () => {
     const record = createAuditRecord(
       {

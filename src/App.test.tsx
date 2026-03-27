@@ -202,6 +202,22 @@ describe('App', () => {
     expect(scoped.getByRole('button', { name: /lås upp cleo på mv/i })).toBeInTheDocument()
   })
 
+  it('allows the same manually selected goalkeeper in multiple periods', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const textarea = screen.getByLabelText(/spelare/i)
+    await user.clear(textarea)
+    await user.type(textarea, 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo\nIris')
+    await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Ada')
+    await user.selectOptions(screen.getByLabelText(/målvakt period 2/i), 'Ada')
+    expect(screen.getByText(/samma målvakt är vald i flera perioder/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
+
+    expect(await screen.findAllByText(/MV: Ada/i)).toHaveLength(2)
+    expect(screen.queryByText(/Välj olika målvakter om du låser perioderna manuellt\./i)).not.toBeInTheDocument()
+  })
+
   it('hydrates a valid shared lineup link including manual swaps', async () => {
     const { shareToken, swappedAssignments } = buildSharedLineupFixture()
     setUrl(`/?lineup=${shareToken}`)

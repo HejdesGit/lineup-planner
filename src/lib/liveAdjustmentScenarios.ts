@@ -1775,7 +1775,7 @@ function isReplacementFromExpectedPool(
     : chunk.goalkeeperId === replacementPlayerId || Object.values(chunk.lineup).includes(replacementPlayerId)
 }
 
-function isSwapFromExpectedPool(_chunk: ChunkPlan, _targetPlayerId: string) {
+function isSwapFromExpectedPool() {
   return true
 }
 

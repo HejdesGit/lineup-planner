@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildGoalkeeperFairnessTargets,
   generateMatchPlan,
   getPlanScoreBreakdown,
   resolveAttemptCount,
@@ -113,6 +114,32 @@ function getOutfieldPlayerToPosition(chunk: ChunkPlan) {
   ) as Record<string, string>
 }
 
+function createPlayerOrderById(players: Player[]) {
+  return Object.fromEntries(players.map((player, index) => [player.id, index])) as Record<string, number>
+}
+
+describe('buildGoalkeeperFairnessTargets', () => {
+  it('does not grant an extra bias chunk to a player who already covers multiple goalkeeper periods', () => {
+    const players = createPlayers(9)
+    const fairnessTargets = buildGoalkeeperFairnessTargets({
+      playerIds: players.map((player) => player.id),
+      goalkeepers: [players[0].id, players[0].id, players[1].id],
+      periodCount: 3,
+      periodMinutes: 15,
+      chunkMinutes: 7.5,
+      outfieldSlotCount: 6,
+      playerOrderById: createPlayerOrderById(players),
+      fallbackTargets: Object.fromEntries(players.map((player) => [player.id, 35])),
+    })
+
+    expect(fairnessTargets[players[0].id]).toBeCloseTo(30, 3)
+    expect(fairnessTargets[players[1].id]).toBeCloseTo(37.5, 3)
+    expect(fairnessTargets[players[2].id]).toBeCloseTo(37.5, 3)
+    expect(fairnessTargets[players[7].id]).toBeCloseTo(30, 3)
+    expect(fairnessTargets[players[8].id]).toBeCloseTo(30, 3)
+  })
+})
+
 describe('generateMatchPlan', () => {
   for (const formation of ['2-3-1', '3-2-1'] as FormationKey[]) {
     for (const chunkMinutes of [5, 7, 10]) {
@@ -215,6 +242,26 @@ describe('generateMatchPlan', () => {
     })
 
     expectNoConsecutiveBenchWindows(plan, players)
+  })
+
+  it('allows the same manually locked goalkeeper across multiple periods while keeping auto-filled periods distinct', () => {
+    const players = createPlayers(9)
+    const repeatedGoalkeeperId = players[0].id
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 15,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [repeatedGoalkeeperId, repeatedGoalkeeperId, null],
+      seed: 6161,
+      attempts: 24,
+    })
+
+    expect(plan.goalkeepers[0]).toBe(repeatedGoalkeeperId)
+    expect(plan.goalkeepers[1]).toBe(repeatedGoalkeeperId)
+    expect(plan.goalkeepers[2]).not.toBeNull()
+    expect(plan.goalkeepers[2]).not.toBe(repeatedGoalkeeperId)
+    expect(plan.lockedGoalkeepers).toEqual([repeatedGoalkeeperId, repeatedGoalkeeperId, null])
   })
 
   it('keeps previously benched players active in the next window for the Bill scenario', () => {

@@ -352,10 +352,6 @@ function validateConfig(
     const selectedGoalkeepers = lockedGoalkeeperIds.filter(
       (goalkeeperId): goalkeeperId is string => Boolean(goalkeeperId),
     )
-    if (new Set(selectedGoalkeepers).size !== selectedGoalkeepers.length) {
-      throw new Error('Välj olika målvakter om du låser perioderna manuellt.')
-    }
-
     for (const goalkeeperId of selectedGoalkeepers) {
       if (!players.some((player) => player.id === goalkeeperId)) {
         throw new Error('En vald målvakt finns inte i spelarlistan.')
@@ -718,6 +714,9 @@ function buildFairnessTargets({
       Math.min(Math.floor(desiredOutfieldChunks[playerId] + ROUNDING_EPSILON), eligibleOutfieldChunks[playerId]),
     ]),
   ) as Record<string, number>
+  const isGoalkeeperBiasEligible = (playerId: string) =>
+    goalkeeperPeriodsByPlayer[playerId] > 0 &&
+    goalkeeperMinuteCounts[playerId] + outfieldChunkMinutes <= neutralTotalTarget + ROUNDING_EPSILON
 
   let remainingChunkSlots =
     matchChunks.length * outfieldSlotCount -
@@ -734,10 +733,16 @@ function buildFairnessTargets({
           return rightNeed - leftNeed
         }
 
-        const leftGoalkeeperPriority = goalkeeperPeriodsByPlayer[left] > 0 ? 1 : 0
-        const rightGoalkeeperPriority = goalkeeperPeriodsByPlayer[right] > 0 ? 1 : 0
+        const leftGoalkeeperPriority = isGoalkeeperBiasEligible(left) ? 1 : 0
+        const rightGoalkeeperPriority = isGoalkeeperBiasEligible(right) ? 1 : 0
         if (rightGoalkeeperPriority !== leftGoalkeeperPriority) {
           return rightGoalkeeperPriority - leftGoalkeeperPriority
+        }
+
+        const leftGoalkeeperMinutes = goalkeeperMinuteCounts[left]
+        const rightGoalkeeperMinutes = goalkeeperMinuteCounts[right]
+        if (Math.abs(leftGoalkeeperMinutes - rightGoalkeeperMinutes) > ROUNDING_EPSILON) {
+          return leftGoalkeeperMinutes - rightGoalkeeperMinutes
         }
 
         return playerOrderById[left] - playerOrderById[right]
@@ -760,7 +765,30 @@ function buildFairnessTargets({
   const normalizationDelta =
     periodCount * periodMinutes * (outfieldSlotCount + 1) -
     Object.values(fairnessTargets).reduce((total, minutes) => total + minutes, 0)
-  const normalizationPlayerId = playerIds[0]
+  const normalizationPlayerId = playerIds
+    .slice()
+    .sort((left, right) => {
+      const leftGoalkeeperMinutes = goalkeeperMinuteCounts[left]
+      const rightGoalkeeperMinutes = goalkeeperMinuteCounts[right]
+
+      if (normalizationDelta > 0 && Math.abs(leftGoalkeeperMinutes - rightGoalkeeperMinutes) > ROUNDING_EPSILON) {
+        return leftGoalkeeperMinutes - rightGoalkeeperMinutes
+      }
+
+      if (normalizationDelta < 0 && Math.abs(leftGoalkeeperMinutes - rightGoalkeeperMinutes) > ROUNDING_EPSILON) {
+        return rightGoalkeeperMinutes - leftGoalkeeperMinutes
+      }
+
+      if (normalizationDelta > 0 && Math.abs(fairnessTargets[left] - fairnessTargets[right]) > ROUNDING_EPSILON) {
+        return fairnessTargets[left] - fairnessTargets[right]
+      }
+
+      if (normalizationDelta < 0 && Math.abs(fairnessTargets[left] - fairnessTargets[right]) > ROUNDING_EPSILON) {
+        return fairnessTargets[right] - fairnessTargets[left]
+      }
+
+      return playerOrderById[left] - playerOrderById[right]
+    })[0]
 
   if (normalizationPlayerId && Math.abs(normalizationDelta) > Number.EPSILON) {
     fairnessTargets[normalizationPlayerId] += normalizationDelta
