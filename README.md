@@ -15,6 +15,14 @@ Appen ar byggd for att snabbt ta fram ett spelbart matchschema dar speltid, bank
 - Kan dela den aktuella uppstallningen via URL och WhatsApp.
 - Fungerar som statisk site och kan hostas pa GitHub Pages.
 
+## Fairness och malvakt
+
+- Malvaktstid raknas som riktig speltid.
+- Appen forsoker fortfarande ge jamn total speltid och rimlig bankfordelning over hela laget.
+- Nar chunk-/bytesfonstren gor perfekt lik speltid omojlig kan appen ge en mjuk fordel till spelare som star i mal, sa att de hellre hamnar i den hogre mojliga minutnivan an i den lagre.
+- Den regeln ar en tie-break, inte en hard prioritering: den ska inte vinna om den tydligt forsamrar vanlig fairness eller rotation.
+- I dagens implementation anvands den bara i de mindre truppfallen dar den losar ett verkligt avrundningsproblem utan att skapa samre fragmentering i storre trupper.
+
 ## Hur den fungerar
 
 1. Fyll i en spelarlista, en spelare per rad eller separerad med komma.
@@ -64,6 +72,8 @@ npm run preview
 ```
 
 ## Scenario-simulering
+
+For en kort manuell UI-verifiering finns en separat checklista i `docs/manual-qa-checklist.md`.
 
 Skriptet `npm run scenarios:live` kor ett fast set realistiska matchsituationer for live-flodet `Tillfalligt ute`.
 

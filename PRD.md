@@ -19,6 +19,7 @@ Det här verktyget är en 7v7-planerare för barn runt 10 år. Verktyget ska hj�
 
 - 7v7 för barn ska främja delaktighet, lärande och mycket speltid.
 - Målvaktstid räknas som riktig speltid och måste kommuniceras tydligt.
+- När chunk-granularitet gör exakt lik speltid omöjlig får produkten ge en mjuk tie-break-fördel till spelare med målvaktstid, så länge det inte tydligt försämrar vanlig fairness eller rotation.
 - Barn bör prova olika roller över tid.
 - Kortare bytesfönster är ofta bättre vid större trupper.
 - MV-säsongsvyn är ett stöd för utbildningsmål, inte ett tvingande regelkrav i produkten.
@@ -101,9 +102,16 @@ Beslut i v1:
 - Detaljvyn ska alltid kunna visa full uppdelning mellan MV, utespelare och total.
 - Summary-vyn får antingen visa `MV: 0 min` eller dölja MV-raden när värdet är 0, så länge totalen fortfarande är tydlig.
 - Befintliga total- och bänkminuter förblir internt konsistenta.
+- När exakt lik totalspeltid inte går att nå på grund av chunkindelningen får spelare med målvaktstid prioriteras till den högre möjliga minutnivån före rena utespelare, men bara som mjuk tie-break.
 
 #### Beroenden / risker
 Kräver att målvaktsminuter härleds från befintlig period- och chunkdata. Ingen ny persistens krävs.
+
+Notering efter implementation:
+
+- Fairness-regeln för målvakt påverkar inte publika typer.
+- `targets` kan fortsatt tolkas som neutral totalfördelning, medan scheduler och live-omplanering får använda separata fairness-targets internt.
+- Regeln är medvetet begränsad till fall där chunkstrukturen gör den stabil; i större trupper får inte målvaktsbias skapa sämre fragmentering eller rotationskvalitet.
 
 ### B3 / P2: Normalisera scoring-vikter per truppstorlek
 ID: B3  
