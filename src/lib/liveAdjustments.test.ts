@@ -38,6 +38,25 @@ function createBoundaryPlan() {
   })
 }
 
+function createGoalkeeperBiasPlan() {
+  const players = createPlayers(['Adam', 'Anton', 'Bill', 'Dante', 'David', 'Elias', 'Emil', 'Gunnar', 'Henry', 'Jax'])
+  const lockedGoalkeeperIds = [players[0].id, players[1].id, players[2].id]
+
+  return {
+    players,
+    lockedGoalkeeperIds,
+    plan: generateMatchPlan({
+      players,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 20 / 3,
+      lockedGoalkeeperIds,
+      seed: 11,
+      attempts: 72,
+    }),
+  }
+}
+
 function getChunkAtMinute(plan: ReturnType<typeof createPlan>, period: number, minute: number) {
   const currentPeriod = plan.periods[period - 1]
   return currentPeriod ? resolveChunkAtMinute(currentPeriod, minute)?.chunk ?? null : null
@@ -94,6 +113,61 @@ describe('liveAdjustments', () => {
     expect(
       Object.values(next.plan.fairnessTargets).reduce((total, minutes) => total + minutes, 0),
     ).toBeCloseTo(next.plan.summaries.reduce((total, summary) => total + summary.totalMinutes, 0), 6)
+  })
+
+  it('preserves the goalkeeper fairness bias through live replanning', () => {
+    const { players, lockedGoalkeeperIds, plan } = createGoalkeeperBiasPlan()
+    const availability = createInitialAvailabilityState(plan)
+    const chunk = getChunkAtMinute(plan, 2, 10)
+
+    if (!chunk) {
+      throw new Error('Aktivt byteblock saknas i testet.')
+    }
+
+    const playerId = chunk.lineup.VB!
+    const replacement = getLiveRecommendations({
+      plan,
+      availability,
+      period: 2,
+      minute: 10,
+      playerId,
+      type: 'temporary-out',
+    })[0]
+
+    const unaffectedGoalkeeperId = lockedGoalkeeperIds.find((goalkeeperId) => goalkeeperId !== chunk.goalkeeperId)
+    const unaffectedOutfielderId = players.find(
+      (player) =>
+        !lockedGoalkeeperIds.includes(player.id) &&
+        player.id !== playerId &&
+        player.id !== replacement.playerId,
+    )?.id
+
+    expect(unaffectedGoalkeeperId).toBeDefined()
+    expect(unaffectedOutfielderId).toBeDefined()
+    expect(plan.fairnessTargets[unaffectedGoalkeeperId!]).toBeGreaterThan(
+      plan.fairnessTargets[unaffectedOutfielderId!],
+    )
+
+    const next = replanMatchFromLiveEvent({
+      plan,
+      availability,
+      event: {
+        type: 'temporary-out',
+        period: 2,
+        minute: 10,
+        playerId,
+        replacementPlayerId: replacement.playerId,
+        status: 'temporarily-out',
+      },
+    })
+
+    expect(next.plan.targets[unaffectedGoalkeeperId!]).toBe(plan.targets[unaffectedGoalkeeperId!])
+    expect(next.plan.fairnessTargets[unaffectedGoalkeeperId!]).toBeGreaterThan(
+      next.plan.targets[unaffectedGoalkeeperId!],
+    )
+    expect(next.plan.fairnessTargets[unaffectedGoalkeeperId!]).toBeGreaterThan(
+      plan.targets[unaffectedGoalkeeperId!],
+    )
   })
 
   it('splits the active chunk and removes unavailable players from future active lineups', () => {

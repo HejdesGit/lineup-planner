@@ -1,5 +1,9 @@
 import { buildSummariesFromPeriods } from './planOverrides'
-import { getPlanScoreBreakdown, scoreOutfieldPosition } from './scheduler'
+import {
+  buildGoalkeeperFairnessTargets,
+  getPlanScoreBreakdown,
+  scoreOutfieldPosition,
+} from './scheduler'
 import {
   ALL_POSITIONS,
   ROLE_GROUPS,
@@ -643,6 +647,17 @@ function replanMatchFromForcedSubstitution({
     adjustedGoalkeepers[periodIndex] = incomingPlayerId
   }
 
+  const baselineFairnessTargets = buildGoalkeeperFairnessTargets({
+    playerIds: allPlayerIds,
+    goalkeepers: adjustedGoalkeepers,
+    periodCount: plan.periodCount ?? adjustedGoalkeepers.length,
+    periodMinutes: plan.periodMinutes,
+    chunkMinutes: plan.chunkMinutes,
+    outfieldSlotCount: plan.positions.length,
+    playerOrderById,
+    fallbackTargets: plan.targets,
+  })
+
   const periods: PeriodPlan[] = [...context.prefixPeriods]
   const currentPeriodChunks = [...context.currentPeriodPrefixChunks]
   let currentPeriodStarted = context.hasStartedCurrentPeriod
@@ -669,7 +684,7 @@ function replanMatchFromForcedSubstitution({
         playerIds: allPlayerIds,
         targets: buildAvailabilityAdjustedTargets({
           playerIds: allPlayerIds,
-          originalTargets: plan.targets,
+          baseTargets: baselineFairnessTargets,
           histories: context.histories,
           futureTemplates: buildFutureTemplates({
             plan,
@@ -763,7 +778,7 @@ function replanMatchFromForcedSubstitution({
   })
   const adjustedFairnessTargets = buildAvailabilityAdjustedTargets({
     playerIds: allPlayerIds,
-    originalTargets: plan.targets,
+    baseTargets: baselineFairnessTargets,
     histories: context.histories,
     futureTemplates,
     goalkeepers: adjustedGoalkeepers,
@@ -1204,7 +1219,7 @@ function buildOutfieldTargets({
 
 function buildAvailabilityAdjustedTargets({
   playerIds,
-  originalTargets,
+  baseTargets,
   histories,
   futureTemplates,
   goalkeepers,
@@ -1212,7 +1227,7 @@ function buildAvailabilityAdjustedTargets({
   activePlayerCount,
 }: {
   playerIds: string[]
-  originalTargets: MatchPlan['targets']
+  baseTargets: MatchPlan['fairnessTargets']
   histories: Record<string, LivePlayerHistory>
   futureTemplates: MatchChunkTemplate[]
   goalkeepers: string[]
@@ -1258,7 +1273,7 @@ function buildAvailabilityAdjustedTargets({
       Math.min(
         Math.max(
           0,
-          originalTargets[playerId] - histories[playerId].actualMinutes - futureGoalkeeperMinutes[playerId],
+          baseTargets[playerId] - histories[playerId].actualMinutes - futureGoalkeeperMinutes[playerId],
         ),
         futureEligibleOutfieldMinutes[playerId],
       ),

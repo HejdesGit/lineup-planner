@@ -115,6 +115,7 @@ interface AssignmentResult {
 }
 
 const DEFAULT_ATTEMPTS = 72
+const ROUNDING_EPSILON = 0.0001
 const AGGREGATE_SCORING_COMPONENTS = new Set<keyof Omit<ScoreComponents, 'playerCount'>>([
   'targetPenalty',
   'repeatPenalty',
@@ -394,17 +395,20 @@ function buildCandidatePlan(
     periodCount,
     rng,
   )
-  const goalkeeperMinuteCounts = Object.fromEntries(playerIds.map((id) => [id, 0])) as Record<
-    string,
-    number
-  >
-
-  for (const goalkeeperId of goalkeepers) {
-    goalkeeperMinuteCounts[goalkeeperId] += periodMinutes
-  }
+  const fairnessTargets = buildGoalkeeperFairnessTargets({
+    playerIds,
+    goalkeepers,
+    periodCount,
+    periodMinutes,
+    chunkMinutes,
+    outfieldSlotCount: positions.length,
+    playerOrderById,
+    fallbackTargets: targets,
+  })
+  const goalkeeperMinuteCounts = buildGoalkeeperMinuteCounts(playerIds, goalkeepers, periodMinutes)
 
   const outfieldTargets = Object.fromEntries(
-    playerIds.map((id) => [id, Math.max(0, targets[id] - goalkeeperMinuteCounts[id])]),
+    playerIds.map((id) => [id, Math.max(0, fairnessTargets[id] - goalkeeperMinuteCounts[id])]),
   ) as Record<string, number>
   const remainingEligibleByPlayer = buildRemainingEligibleLookup(playerIds, matchChunks, goalkeepers)
   const histories = createHistories(players, goalkeepers)
@@ -557,14 +561,14 @@ function buildCandidatePlan(
     }
   })
 
-  const scoreComponents = buildScoreComponents(targets, histories, periods, players.length)
+  const scoreComponents = buildScoreComponents(fairnessTargets, histories, periods, players.length)
 
   return {
     score: scoreComponentsToTotal(scoreComponents, ACTIVE_SCORING_PROFILE.name).totalScore,
     periods,
     summaries,
     targets,
-    fairnessTargets: targets,
+    fairnessTargets,
     goalkeepers,
   }
 }
@@ -599,6 +603,170 @@ function resolveGoalkeepers(
   }
 
   return chosen as string[]
+}
+
+function buildGoalkeeperMinuteCounts(
+  playerIds: string[],
+  goalkeepers: string[],
+  periodMinutes: number,
+) {
+  const goalkeeperMinuteCounts = Object.fromEntries(playerIds.map((id) => [id, 0])) as Record<
+    string,
+    number
+  >
+
+  for (const goalkeeperId of goalkeepers) {
+    goalkeeperMinuteCounts[goalkeeperId] += periodMinutes
+  }
+
+  return goalkeeperMinuteCounts
+}
+
+export function buildGoalkeeperFairnessTargets({
+  playerIds,
+  goalkeepers,
+  periodCount,
+  periodMinutes,
+  chunkMinutes,
+  outfieldSlotCount,
+  playerOrderById,
+  fallbackTargets,
+}: {
+  playerIds: string[]
+  goalkeepers: string[]
+  periodCount: number
+  periodMinutes: number
+  chunkMinutes: number
+  outfieldSlotCount: number
+  playerOrderById: Record<string, number>
+  fallbackTargets: Record<string, number>
+}) {
+  const matchChunks = buildMatchChunks(periodCount, periodMinutes, chunkMinutes)
+  const goalkeeperMinuteCounts = buildGoalkeeperMinuteCounts(playerIds, goalkeepers, periodMinutes)
+
+  return buildFairnessTargets({
+    playerIds,
+    fallbackTargets,
+    matchChunks,
+    goalkeepers,
+    goalkeeperMinuteCounts,
+    periodCount,
+    periodMinutes,
+    outfieldSlotCount,
+    playerOrderById,
+  })
+}
+
+function buildFairnessTargets({
+  playerIds,
+  fallbackTargets,
+  matchChunks,
+  goalkeepers,
+  goalkeeperMinuteCounts,
+  periodCount,
+  periodMinutes,
+  outfieldSlotCount,
+  playerOrderById,
+}: {
+  playerIds: string[]
+  fallbackTargets: Record<string, number>
+  matchChunks: MatchChunk[]
+  goalkeepers: string[]
+  goalkeeperMinuteCounts: Record<string, number>
+  periodCount: number
+  periodMinutes: number
+  outfieldSlotCount: number
+  playerOrderById: Record<string, number>
+}) {
+  if (playerIds.length > 10) {
+    return fallbackTargets
+  }
+
+  const chunkDurations = matchChunks.map((chunk) => chunk.durationMinutes)
+  const minChunkDuration = Math.min(...chunkDurations)
+  const maxChunkDuration = Math.max(...chunkDurations)
+
+  if (
+    !Number.isFinite(minChunkDuration) ||
+    !Number.isFinite(maxChunkDuration) ||
+    maxChunkDuration - minChunkDuration > 0.01
+  ) {
+    return fallbackTargets
+  }
+
+  const chunkCountPerPeriod = Math.max(matchChunks.length / Math.max(periodCount, 1), 1)
+  const outfieldChunkMinutes = periodMinutes / chunkCountPerPeriod
+  const neutralTotalTarget = (periodCount * periodMinutes * (outfieldSlotCount + 1)) / playerIds.length
+  const goalkeeperPeriodsByPlayer = Object.fromEntries(
+    playerIds.map((playerId) => [playerId, goalkeepers.filter((goalkeeperId) => goalkeeperId === playerId).length]),
+  ) as Record<string, number>
+  const eligibleOutfieldChunks = Object.fromEntries(
+    playerIds.map((playerId) => [
+      playerId,
+      Math.max(matchChunks.length - goalkeeperPeriodsByPlayer[playerId] * chunkCountPerPeriod, 0),
+    ]),
+  ) as Record<string, number>
+  const desiredOutfieldChunks = Object.fromEntries(
+    playerIds.map((playerId) => [
+      playerId,
+      Math.max(0, (neutralTotalTarget - goalkeeperMinuteCounts[playerId]) / outfieldChunkMinutes),
+    ]),
+  ) as Record<string, number>
+  const allocatedOutfieldChunks = Object.fromEntries(
+    playerIds.map((playerId) => [
+      playerId,
+      Math.min(Math.floor(desiredOutfieldChunks[playerId] + ROUNDING_EPSILON), eligibleOutfieldChunks[playerId]),
+    ]),
+  ) as Record<string, number>
+
+  let remainingChunkSlots =
+    matchChunks.length * outfieldSlotCount -
+    Object.values(allocatedOutfieldChunks).reduce((total, chunkCount) => total + chunkCount, 0)
+
+  while (remainingChunkSlots > 0) {
+    const nextPlayerId = playerIds
+      .filter((playerId) => allocatedOutfieldChunks[playerId] < eligibleOutfieldChunks[playerId])
+      .sort((left, right) => {
+        const leftNeed = desiredOutfieldChunks[left] - allocatedOutfieldChunks[left]
+        const rightNeed = desiredOutfieldChunks[right] - allocatedOutfieldChunks[right]
+
+        if (Math.abs(rightNeed - leftNeed) > ROUNDING_EPSILON) {
+          return rightNeed - leftNeed
+        }
+
+        const leftGoalkeeperPriority = goalkeeperPeriodsByPlayer[left] > 0 ? 1 : 0
+        const rightGoalkeeperPriority = goalkeeperPeriodsByPlayer[right] > 0 ? 1 : 0
+        if (rightGoalkeeperPriority !== leftGoalkeeperPriority) {
+          return rightGoalkeeperPriority - leftGoalkeeperPriority
+        }
+
+        return playerOrderById[left] - playerOrderById[right]
+      })[0]
+
+    if (!nextPlayerId) {
+      break
+    }
+
+    allocatedOutfieldChunks[nextPlayerId] += 1
+    remainingChunkSlots -= 1
+  }
+
+  const fairnessTargets = Object.fromEntries(
+    playerIds.map((playerId) => [
+      playerId,
+      goalkeeperMinuteCounts[playerId] + allocatedOutfieldChunks[playerId] * outfieldChunkMinutes,
+    ]),
+  ) as Record<string, number>
+  const normalizationDelta =
+    periodCount * periodMinutes * (outfieldSlotCount + 1) -
+    Object.values(fairnessTargets).reduce((total, minutes) => total + minutes, 0)
+  const normalizationPlayerId = playerIds[0]
+
+  if (normalizationPlayerId && Math.abs(normalizationDelta) > Number.EPSILON) {
+    fairnessTargets[normalizationPlayerId] += normalizationDelta
+  }
+
+  return fairnessTargets
 }
 
 export function resolveAttemptCount({

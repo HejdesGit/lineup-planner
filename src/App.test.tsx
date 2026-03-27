@@ -190,15 +190,11 @@ describe('App', () => {
     const scoped = within(view.container)
 
     const textarea = scoped.getAllByRole('textbox')[0] as HTMLTextAreaElement
-    const comboboxes = scoped.getAllByRole('combobox') as HTMLSelectElement[]
-    const goalkeeperPeriod1 = comboboxes[3]
-    const goalkeeperPeriod2 = comboboxes[4]
-    const goalkeeperPeriod3 = comboboxes[5]
     await user.clear(textarea)
     await user.type(textarea, 'Ada\nBea\nCleo\nDani\nEli\nFia\nGio\nHugo\nIris')
-    await user.selectOptions(goalkeeperPeriod1, 'Ada')
-    await user.selectOptions(goalkeeperPeriod2, 'Bea')
-    await user.selectOptions(goalkeeperPeriod3, 'Cleo')
+    await user.selectOptions(scoped.getByLabelText(/målvakt period 1/i), 'Ada')
+    await user.selectOptions(scoped.getByLabelText(/målvakt period 2/i), 'Bea')
+    await user.selectOptions(scoped.getByLabelText(/målvakt period 3/i), 'Cleo')
     await user.click(scoped.getByRole('button', { name: /generera uppställning/i }))
 
     expect(await scoped.findByRole('button', { name: /lås upp ada på mv/i })).toBeInTheDocument()
@@ -634,7 +630,7 @@ describe('App', () => {
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1)
     expect(scrollIntoViewMock).toHaveBeenCalledWith({
       behavior: 'smooth',
-      block: 'center',
+      block: 'start',
     })
   })
 
@@ -761,18 +757,22 @@ describe('App', () => {
     await user.click(within(activePeriodCard).getByRole('button', { name: /bekräfta live-byte/i }))
 
     await waitFor(() => {
-      expect(
-        within(activePeriodCard).getByRole('button', {
-          name: new RegExp(`öppna liveval för ${sourceInfo.playerName} på ${targetInfo.position}`, 'i'),
-        }),
-      ).toBeInTheDocument()
-    })
-    await waitFor(() => {
-      expect(
-        within(activePeriodCard).getByRole('button', {
-          name: new RegExp(`öppna liveval för ${targetInfo.playerName} på ${sourceInfo.position}`, 'i'),
-        }),
-      ).toBeInTheDocument()
+      const liveLabels = within(activePeriodCard)
+        .getAllByRole('button', {
+          name: /öppna liveval för .* på /i,
+        })
+        .map((button) => button.getAttribute('aria-label') ?? '')
+      const swappedSourceLabel = liveLabels.find((label) => label.includes(`för ${sourceInfo.playerName} på `))
+      const swappedTargetLabel = liveLabels.find((label) => label.includes(`för ${targetInfo.playerName} på `))
+
+      expect(swappedSourceLabel).toBeDefined()
+      expect(swappedTargetLabel).toBeDefined()
+      expect(parseLiveBadgeLabel(swappedSourceLabel ?? '', 'Öppna liveval för').position).toBe(
+        targetInfo.position,
+      )
+      expect(parseLiveBadgeLabel(swappedTargetLabel ?? '', 'Öppna liveval för').position).toBe(
+        sourceInfo.position,
+      )
     })
   })
 
