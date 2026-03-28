@@ -314,20 +314,23 @@ describe('App', () => {
     expect(getLineupParam()).toBe(syncedLineup)
   })
 
-  it('adds the next cup match and clears manual goalkeeper selections for the new match', async () => {
+  it('opens WhatsApp with the current share url in the message text', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
     const user = userEvent.setup()
     render(<App />)
 
-    await user.selectOptions(screen.getByLabelText(/antal perioder/i), '1')
-    await user.selectOptions(screen.getByLabelText(/målvakt period 1/i), 'Adam')
-    await user.click(screen.getByRole('button', { name: /generera uppställning/i }))
-    await screen.findAllByText(/period 1/i)
+    await user.click(screen.getByRole('button', { name: /dela via whatsapp/i }))
 
-    await user.click(screen.getByRole('button', { name: /lägg till match/i }))
+    expect(openSpy).toHaveBeenCalledTimes(1)
 
-    expect(await screen.findByText(/1 match är sparad/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/målvakt period 1/i)).toHaveValue('')
-    expect(screen.getByText(/Match 2 · 1 period/i)).toBeInTheDocument()
+    const [openedUrl] = openSpy.mock.calls[0]
+    const whatsappUrl = new URL(openedUrl as string)
+    const message = whatsappUrl.searchParams.get('text')
+
+    expect(whatsappUrl.origin).toBe('https://wa.me')
+    expect(message).toContain('Uppställning EIK:')
+    expect(message).toContain(window.location.href)
+    expect(getLineupParam()).not.toBeNull()
   })
 
   it('falls back to the default state when the shared link is invalid', async () => {

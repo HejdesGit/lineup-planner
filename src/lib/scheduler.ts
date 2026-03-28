@@ -5,7 +5,6 @@ import {
   PERIOD_COUNT_OPTIONS,
   PERIOD_MINUTE_OPTIONS,
   ROLE_GROUPS,
-  type CarryOverPlayerStats,
   type ChunkSubstitution,
   type FormationKey,
   type Lineup,
@@ -103,19 +102,6 @@ interface SchedulerContext {
   playerIds: string[]
   playerOrderById: Record<string, number>
   nameById: Record<string, string>
-  carryOverByPlayerId: Record<string, CarryOverPlayerState>
-  totalCarryOverMinutes: number
-}
-
-interface CarryOverPlayerState {
-  actualMinutes: number
-  outfieldMinutes: number
-  benchMinutes: number
-  goalkeeperMinutes: number
-  groupCounts: Record<RoleGroup, number>
-  positionCounts: Record<OutfieldPosition, number>
-  groupsPlayed: Set<RoleGroup>
-  positionsPlayed: Set<OutfieldPosition>
 }
 
 export type ScoringProfileName = 'legacy' | 'normalized'
@@ -289,7 +275,6 @@ export function generateMatchPlan({
   formation,
   chunkMinutes,
   lockedGoalkeeperIds,
-  priorPlayerStats,
   seed = Date.now(),
   attempts,
 }: MatchConfig): MatchPlan {
@@ -302,7 +287,6 @@ export function generateMatchPlan({
     formation,
     chunkMinutes,
     lockedGoalkeeperIds,
-    priorPlayerStats,
   )
 
   let best: EvaluatedCandidatePlan | null = null
@@ -371,7 +355,6 @@ function buildSchedulerContext(
   formation: FormationKey,
   chunkMinutes: number,
   lockedGoalkeeperIds: Array<string | null> | undefined,
-  priorPlayerStats: CarryOverPlayerStats[] | undefined,
 ): SchedulerContext {
   const positions = FORMATION_PRESETS[formation].positions
   const normalizedLockedGoalkeepers = normalizeLockedGoalkeepers(lockedGoalkeeperIds, periodCount)
@@ -383,7 +366,6 @@ function buildSchedulerContext(
   }
 
   const playerIds = players.map((player) => player.id)
-  const carryOverByPlayerId = buildCarryOverLookup(players, priorPlayerStats)
 
   return {
     positions,
@@ -402,84 +384,7 @@ function buildSchedulerContext(
       number
     >,
     nameById: Object.fromEntries(players.map((player) => [player.id, player.name])),
-    carryOverByPlayerId,
-    totalCarryOverMinutes: Object.values(carryOverByPlayerId).reduce(
-      (total, carryOver) => total + carryOver.actualMinutes,
-      0,
-    ),
   }
-}
-
-function buildCarryOverLookup(
-  players: Player[],
-  priorPlayerStats: CarryOverPlayerStats[] | undefined,
-): Record<string, CarryOverPlayerState> {
-  const carryOverByName = new Map(
-    (priorPlayerStats ?? []).map((entry) => [normalizePlayerName(entry.name), entry]),
-  )
-
-  return Object.fromEntries(
-    players.map((player) => {
-      const carryOver = carryOverByName.get(normalizePlayerName(player.name))
-
-      return [
-        player.id,
-        {
-          actualMinutes: carryOver?.totalMinutes ?? 0,
-          outfieldMinutes: carryOver?.outfieldMinutes ?? 0,
-          benchMinutes: carryOver?.benchMinutes ?? 0,
-          goalkeeperMinutes: carryOver?.goalkeeperMinutes ?? 0,
-          groupCounts: {
-            ...createRoleGroupCountMap(),
-            ...(carryOver?.groupMinutes ?? {}),
-          },
-          positionCounts: {
-            ...createPositionCountMap(),
-            ...(carryOver?.positionMinutes ?? {}),
-          },
-          groupsPlayed: new Set<RoleGroup>(carryOver?.roleGroups ?? []),
-          positionsPlayed: new Set<OutfieldPosition>(carryOver?.positionsPlayed ?? []),
-        } satisfies CarryOverPlayerState,
-      ]
-    }),
-  ) as Record<string, CarryOverPlayerState>
-}
-
-function buildCumulativeFairnessTargets(
-  playerIds: string[],
-  cumulativeTargets: Record<string, number>,
-  currentTargets: Record<string, number>,
-  currentFairnessTargets: Record<string, number>,
-) {
-  return Object.fromEntries(
-    playerIds.map((playerId) => [
-      playerId,
-      cumulativeTargets[playerId] + (currentFairnessTargets[playerId] - currentTargets[playerId]),
-    ]),
-  ) as Record<string, number>
-}
-
-function buildCumulativeTargets(
-  playerIds: string[],
-  currentTargets: Record<string, number>,
-  totalCarryOverMinutes: number,
-  playerOrderById: Record<string, number>,
-) {
-  const normalizedCarryOverMinutes = Math.max(Math.round(totalCarryOverMinutes), 0)
-  const carryOverBaseMinutes = Math.floor(normalizedCarryOverMinutes / playerIds.length)
-  const carryOverRemainder = normalizedCarryOverMinutes % playerIds.length
-  const orderedPlayerIds = playerIds.slice().sort((left, right) => playerOrderById[left] - playerOrderById[right])
-
-  return Object.fromEntries(
-    orderedPlayerIds.map((playerId, index) => [
-      playerId,
-      currentTargets[playerId] + carryOverBaseMinutes + (index < carryOverRemainder ? 1 : 0),
-    ]),
-  ) as Record<string, number>
-}
-
-function normalizePlayerName(name: string) {
-  return name.trim().toLocaleLowerCase('sv-SE')
 }
 
 function validateConfig(
@@ -622,39 +527,17 @@ function runCandidatePlan(
     playerOrderById: context.playerOrderById,
     fallbackTargets: targets,
   })
-  const cumulativeTargets = buildCumulativeTargets(
-    context.playerIds,
-    targets,
-    context.totalCarryOverMinutes,
-    context.playerOrderById,
-  )
-  const cumulativeFairnessTargets = buildCumulativeFairnessTargets(
-    context.playerIds,
-    cumulativeTargets,
-    targets,
-    fairnessTargets,
-  )
   const goalkeeperMinuteCounts = buildGoalkeeperMinuteCounts(context.playerIds, goalkeepers, periodMinutes)
-  const cumulativeGoalkeeperMinuteCounts = Object.fromEntries(
-    context.playerIds.map((id) => [
-      id,
-      context.carryOverByPlayerId[id].goalkeeperMinutes + goalkeeperMinuteCounts[id],
-    ]),
-  ) as Record<string, number>
 
   const outfieldTargets = Object.fromEntries(
-    context.playerIds.map((id) => [
-      id,
-      Math.max(0, cumulativeFairnessTargets[id] - cumulativeGoalkeeperMinuteCounts[id]),
-    ]),
+    context.playerIds.map((id) => [id, Math.max(0, fairnessTargets[id] - goalkeeperMinuteCounts[id])]),
   ) as Record<string, number>
   const remainingEligibleByPlayer = buildRemainingEligibleLookup(
     context.playerIds,
     context.matchChunks,
     goalkeepers,
   )
-  const histories = createHistories(players, goalkeepers, context.carryOverByPlayerId)
-  const summaryHistories = includeOutput ? createMatchOnlyHistories(players, goalkeepers) : null
+  const histories = createHistories(players, goalkeepers)
   const periods: PeriodPlan[] = []
   let previousStarterIds: Set<string> | null = null
   let previousBenchIds: Set<string> | null = null
@@ -662,7 +545,7 @@ function runCandidatePlan(
 
   for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     const goalkeeperId = goalkeepers[periodIndex]
-    const chunks: PeriodPlan['chunks'] | null = includeOutput ? [] : null
+    const chunks = includeOutput ? [] : null
     const substituteSet = new Set<string>()
     const periodChunks = context.chunksByPeriod[periodIndex] ?? []
     let previousLineup: Lineup | null = null
@@ -707,43 +590,35 @@ function runCandidatePlan(
       const activeSet = new Set(activePlayerIds)
 
       for (const playerId of context.playerIds) {
+        const history = histories[playerId]
         const isActive = activeSet.has(playerId)
+        const nextState = isActive ? 'active' : 'bench'
 
-        for (const historyMap of [histories, summaryHistories].filter(
-          (value): value is Record<string, PlayerHistory> => value !== null,
-        )) {
-          const history = historyMap[playerId]
-          const nextState = isActive ? 'active' : 'bench'
-
-          if (history.lastChunkState && history.lastChunkState !== nextState) {
-            history.stateTransitions += 1
-          }
-
-          if (isActive) {
-            history.actualMinutes += chunk.durationMinutes
-            history.playStreak += 1
-            history.benchStreak = 0
-          } else {
-            if (history.playStreak === 1) {
-              history.shortPlayBlocks += 1
-            }
-            const nextBenchStreak = history.benchStreak + 1
-            if (history.benchStreak > 0) {
-              history.consecutiveBenchViolations += 1
-              history.benchViolationWeight += nextBenchStreak
-            }
-            history.benchMinutes += chunk.durationMinutes
-            history.playStreak = 0
-            history.benchStreak = nextBenchStreak
-            history.maxBenchStreak = Math.max(history.maxBenchStreak, nextBenchStreak)
-          }
-
-          history.lastChunkState = nextState
+        if (history.lastChunkState && history.lastChunkState !== nextState) {
+          history.stateTransitions += 1
         }
 
-        if (!isActive) {
+        if (isActive) {
+          history.actualMinutes += chunk.durationMinutes
+          history.playStreak += 1
+          history.benchStreak = 0
+        } else {
+          if (history.playStreak === 1) {
+            history.shortPlayBlocks += 1
+          }
+          const nextBenchStreak = history.benchStreak + 1
+          if (history.benchStreak > 0) {
+            history.consecutiveBenchViolations += 1
+            history.benchViolationWeight += nextBenchStreak
+          }
+          history.benchMinutes += chunk.durationMinutes
+          history.playStreak = 0
+          history.benchStreak = nextBenchStreak
+          history.maxBenchStreak = Math.max(history.maxBenchStreak, nextBenchStreak)
           substituteSet.add(playerId)
         }
+
+        history.lastChunkState = nextState
       }
 
       if (phase === 'period-start') {
@@ -755,16 +630,6 @@ function runCandidatePlan(
           assignment,
           histories,
         )
-        if (summaryHistories) {
-          updatePeriodStartHistory(
-            context.playerIds,
-            goalkeeperId,
-            activeSet,
-            context.positions,
-            assignment,
-            summaryHistories,
-          )
-        }
         const starterIds = new Set(
           context.positions.map((position) => getLineupPlayer(assignment, position)),
         )
@@ -781,28 +646,23 @@ function runCandidatePlan(
 
       for (const position of context.positions) {
         const playerId = getLineupPlayer(assignment, position)
+        const history = histories[playerId]
         const group = getRoleGroup(position)
 
-        for (const historyMap of [histories, summaryHistories].filter(
-          (value): value is Record<string, PlayerHistory> => value !== null,
-        )) {
-          const history = historyMap[playerId]
-
-          if (history.lastOutfieldPosition === position) {
-            history.samePositionRepeats += 1
-          }
-          if (history.lastOutfieldGroup === group) {
-            history.sameGroupRepeats += 1
-          }
-
-          history.outfieldMinutes += chunk.durationMinutes
-          history.lastOutfieldPosition = position
-          history.lastOutfieldGroup = group
-          history.positionCounts[position] += chunk.durationMinutes
-          history.groupCounts[group] += chunk.durationMinutes
-          history.positionsPlayed.add(position)
-          history.groupsPlayed.add(group)
+        if (history.lastOutfieldPosition === position) {
+          history.samePositionRepeats += 1
         }
+        if (history.lastOutfieldGroup === group) {
+          history.sameGroupRepeats += 1
+        }
+
+        history.outfieldMinutes += chunk.durationMinutes
+        history.lastOutfieldPosition = position
+        history.lastOutfieldGroup = group
+        history.positionCounts[position] += chunk.durationMinutes
+        history.groupCounts[group] += chunk.durationMinutes
+        history.positionsPlayed.add(position)
+        history.groupsPlayed.add(group)
       }
 
       if (chunks) {
@@ -841,18 +701,14 @@ function runCandidatePlan(
     }
   }
 
-  for (const historyMap of [histories, summaryHistories].filter(
-    (value): value is Record<string, PlayerHistory> => value !== null,
-  )) {
-    for (const history of Object.values(historyMap)) {
-      if (history.playStreak === 1) {
-        history.shortPlayBlocks += 1
-      }
+  for (const history of Object.values(histories)) {
+    if (history.playStreak === 1) {
+      history.shortPlayBlocks += 1
     }
   }
 
   const scoreComponents = buildScoreComponentsFromState(
-    cumulativeFairnessTargets,
+    fairnessTargets,
     histories,
     players.length,
     periodStartVariationPenalty,
@@ -863,7 +719,20 @@ function runCandidatePlan(
     return { score }
   }
 
-  const summaries = buildPlayerSummariesFromHistories(players, summaryHistories ?? histories)
+  const summaries = players.map((player) => {
+    const history = histories[player.id]
+    return {
+      playerId: player.id,
+      name: player.name,
+      totalMinutes: history.actualMinutes,
+      benchMinutes: history.benchMinutes,
+      goalkeeperPeriods: [...history.goalkeeperPeriods],
+      positionsPlayed: ALL_POSITIONS.filter((position) => history.positionsPlayed.has(position)),
+      roleGroups: (['DEF', 'MID', 'ATT'] as RoleGroup[]).filter((group) =>
+        history.groupsPlayed.has(group),
+      ),
+    }
+  })
 
   return {
     score,
@@ -1162,104 +1031,48 @@ function roundMinuteValue(value: number) {
   return Math.round(value * 1000) / 1000
 }
 
-function createRoleGroupCountMap() {
-  return { DEF: 0, MID: 0, ATT: 0 } satisfies Record<RoleGroup, number>
-}
-
-function createPositionCountMap() {
-  return { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 } satisfies Record<OutfieldPosition, number>
-}
-
-function createEmptyHistory(goalkeeperPeriods: number[] = []): PlayerHistory {
-  return {
-    actualMinutes: 0,
-    outfieldMinutes: 0,
-    benchMinutes: 0,
-    playStreak: 0,
-    benchStreak: 0,
-    lastChunkState: null,
-    stateTransitions: 0,
-    shortPlayBlocks: 0,
-    consecutiveBenchViolations: 0,
-    benchViolationWeight: 0,
-    maxBenchStreak: 0,
-    goalkeeperPeriods,
-    lastOutfieldPosition: null,
-    lastOutfieldGroup: null,
-    groupCounts: createRoleGroupCountMap(),
-    positionCounts: createPositionCountMap(),
-    groupsPlayed: new Set<RoleGroup>(),
-    positionsPlayed: new Set<OutfieldPosition>(),
-    samePositionRepeats: 0,
-    sameGroupRepeats: 0,
-    periodStarts: 0,
-    periodBenchStarts: 0,
-    startedPreviousPeriod: false,
-    benchedPreviousPeriod: false,
-    lastStartPosition: null,
-    lastStartGroup: null,
-    startGroupCounts: createRoleGroupCountMap(),
-    startPositionCounts: createPositionCountMap(),
-    startGroupsPlayed: new Set<RoleGroup>(),
-    startPositionsPlayed: new Set<OutfieldPosition>(),
-    sameStartPositionRepeats: 0,
-    sameStartGroupRepeats: 0,
-    repeatedStartPeriods: 0,
-    repeatedBenchStartPeriods: 0,
-  }
-}
-
-function createHistoryFromCarryOver(
-  carryOver: CarryOverPlayerState | undefined,
-  goalkeeperPeriods: number[],
-): PlayerHistory {
-  const history = createEmptyHistory(goalkeeperPeriods)
-
-  if (!carryOver) {
-    return history
-  }
-
-  history.actualMinutes = carryOver.actualMinutes
-  history.outfieldMinutes = carryOver.outfieldMinutes
-  history.benchMinutes = carryOver.benchMinutes
-  history.groupCounts = { ...carryOver.groupCounts }
-  history.positionCounts = { ...carryOver.positionCounts }
-  history.groupsPlayed = new Set(carryOver.groupsPlayed)
-  history.positionsPlayed = new Set(carryOver.positionsPlayed)
-
-  return history
-}
-
-function createHistories(
-  players: Player[],
-  goalkeepers: string[],
-  carryOverByPlayerId: Record<string, CarryOverPlayerState>,
-): Record<string, PlayerHistory> {
+function createHistories(players: Player[], goalkeepers: string[]): Record<string, PlayerHistory> {
   return Object.fromEntries(
     players.map((player) => [
       player.id,
-      createHistoryFromCarryOver(
-        carryOverByPlayerId[player.id],
-        goalkeepers
+      {
+        actualMinutes: 0,
+        outfieldMinutes: 0,
+        benchMinutes: 0,
+        playStreak: 0,
+        benchStreak: 0,
+        lastChunkState: null,
+        stateTransitions: 0,
+        shortPlayBlocks: 0,
+        consecutiveBenchViolations: 0,
+        benchViolationWeight: 0,
+        maxBenchStreak: 0,
+        goalkeeperPeriods: goalkeepers
           .map((goalkeeperId, index) => (goalkeeperId === player.id ? index + 1 : null))
           .filter((value): value is number => value !== null),
-      ),
-    ]),
-  )
-}
-
-function createMatchOnlyHistories(
-  players: Player[],
-  goalkeepers: string[],
-): Record<string, PlayerHistory> {
-  return Object.fromEntries(
-    players.map((player) => [
-      player.id,
-      createEmptyHistory(
-        goalkeepers
-          .map((goalkeeperId, index) => (goalkeeperId === player.id ? index + 1 : null))
-          .filter((value): value is number => value !== null),
-      ),
+        lastOutfieldPosition: null,
+        lastOutfieldGroup: null,
+        groupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        positionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        groupsPlayed: new Set<RoleGroup>(),
+        positionsPlayed: new Set<OutfieldPosition>(),
+        samePositionRepeats: 0,
+        sameGroupRepeats: 0,
+        periodStarts: 0,
+        periodBenchStarts: 0,
+        startedPreviousPeriod: false,
+        benchedPreviousPeriod: false,
+        lastStartPosition: null,
+        lastStartGroup: null,
+        startGroupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        startPositionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        startGroupsPlayed: new Set<RoleGroup>(),
+        startPositionsPlayed: new Set<OutfieldPosition>(),
+        sameStartPositionRepeats: 0,
+        sameStartGroupRepeats: 0,
+        repeatedStartPeriods: 0,
+        repeatedBenchStartPeriods: 0,
+      },
     ]),
   )
 }
@@ -1981,33 +1794,54 @@ function countIntersection<T>(left: Set<T>, right: Set<T>) {
 function createHistoriesFromPlan(
   plan: Pick<MatchPlan, 'periods' | 'summaries'>,
 ): Record<string, PlayerHistory> {
-  return createHistoriesFromPeriods(
-    plan.summaries.map((summary) => ({
-      id: summary.playerId,
-      name: summary.name,
-    })),
-    plan.periods,
-  )
-}
-
-function createHistoriesFromPeriods(
-  players: Array<Pick<Player, 'id' | 'name'>>,
-  periods: PeriodPlan[],
-): Record<string, PlayerHistory> {
-  const playerIds = players.map((player) => player.id)
+  const playerIds = plan.summaries.map((summary) => summary.playerId)
   const histories = Object.fromEntries(
     playerIds.map((playerId) => [
       playerId,
-      createEmptyHistory(),
+      {
+        actualMinutes: 0,
+        outfieldMinutes: 0,
+        benchMinutes: 0,
+        playStreak: 0,
+        benchStreak: 0,
+        lastChunkState: null,
+        stateTransitions: 0,
+        shortPlayBlocks: 0,
+        consecutiveBenchViolations: 0,
+        benchViolationWeight: 0,
+        maxBenchStreak: 0,
+        goalkeeperPeriods: [],
+        lastOutfieldPosition: null,
+        lastOutfieldGroup: null,
+        groupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        positionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        groupsPlayed: new Set<RoleGroup>(),
+        positionsPlayed: new Set<OutfieldPosition>(),
+        samePositionRepeats: 0,
+        sameGroupRepeats: 0,
+        periodStarts: 0,
+        periodBenchStarts: 0,
+        startedPreviousPeriod: false,
+        benchedPreviousPeriod: false,
+        lastStartPosition: null,
+        lastStartGroup: null,
+        startGroupCounts: { DEF: 0, MID: 0, ATT: 0 },
+        startPositionCounts: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
+        startGroupsPlayed: new Set<RoleGroup>(),
+        startPositionsPlayed: new Set<OutfieldPosition>(),
+        sameStartPositionRepeats: 0,
+        sameStartGroupRepeats: 0,
+        repeatedStartPeriods: 0,
+        repeatedBenchStartPeriods: 0,
+      } satisfies PlayerHistory,
     ]),
   ) as Record<string, PlayerHistory>
 
-  for (const period of periods) {
+  for (const period of plan.periods) {
     const firstChunk = period.chunks[0]
     const starterIds = new Set(
       firstChunk ? period.positions.map((position) => getLineupPlayer(firstChunk.lineup, position)) : [],
     )
-    histories[period.goalkeeperId]?.goalkeeperPeriods.push(period.period)
 
     for (const playerId of playerIds) {
       const history = histories[playerId]
@@ -2122,27 +1956,6 @@ function createHistoriesFromPeriods(
   }
 
   return histories
-}
-
-function buildPlayerSummariesFromHistories(
-  players: Array<Pick<Player, 'id' | 'name'>>,
-  histories: Record<string, PlayerHistory>,
-): PlayerSummary[] {
-  return players.map((player) => {
-    const history = histories[player.id]
-
-    return {
-      playerId: player.id,
-      name: player.name,
-      totalMinutes: history.actualMinutes,
-      benchMinutes: history.benchMinutes,
-      goalkeeperPeriods: [...history.goalkeeperPeriods],
-      positionsPlayed: ALL_POSITIONS.filter((position) => history.positionsPlayed.has(position)),
-      roleGroups: (['DEF', 'MID', 'ATT'] as RoleGroup[]).filter((group) =>
-        history.groupsPlayed.has(group),
-      ),
-    }
-  })
 }
 
 function distributeTargetMinutes(

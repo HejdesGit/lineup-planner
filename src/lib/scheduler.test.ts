@@ -7,13 +7,7 @@ import {
   scoreComponentsToTotal,
   scoreOutfieldPosition,
 } from './scheduler'
-import {
-  FORMATION_PRESETS,
-  type CarryOverPlayerStats,
-  type ChunkPlan,
-  type FormationKey,
-  type Player,
-} from './types'
+import { FORMATION_PRESETS, type ChunkPlan, type FormationKey, type Player } from './types'
 
 function createPlayers(count: number): Player[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -122,28 +116,6 @@ function getOutfieldPlayerToPosition(chunk: ChunkPlan) {
 
 function createPlayerOrderById(players: Player[]) {
   return Object.fromEntries(players.map((player, index) => [player.id, index])) as Record<string, number>
-}
-
-function createCarryOverStats(
-  players: Player[],
-  overrides: Partial<Record<string, Partial<CarryOverPlayerStats>>>,
-): CarryOverPlayerStats[] {
-  return players.map((player) => {
-    const override = overrides[player.name] ?? {}
-
-    return {
-      name: player.name,
-      totalMinutes: 20,
-      outfieldMinutes: 20,
-      benchMinutes: 0,
-      goalkeeperMinutes: 0,
-      positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 20, HM: 0, A: 0 },
-      groupMinutes: { DEF: 0, MID: 20, ATT: 0 },
-      positionsPlayed: ['CM'],
-      roleGroups: ['MID'],
-      ...override,
-    }
-  })
 }
 
 describe('buildGoalkeeperFairnessTargets', () => {
@@ -290,90 +262,6 @@ describe('generateMatchPlan', () => {
     expect(plan.goalkeepers[2]).not.toBeNull()
     expect(plan.goalkeepers[2]).not.toBe(repeatedGoalkeeperId)
     expect(plan.lockedGoalkeepers).toEqual([repeatedGoalkeeperId, repeatedGoalkeeperId, null])
-  })
-
-  it('compensates for prior cup imbalance when generating the next match', () => {
-    const players = createPlayers(8)
-    const priorPlayerStats = createCarryOverStats(players, {
-      'Spelare 1': {
-        totalMinutes: 40,
-        outfieldMinutes: 40,
-        benchMinutes: 0,
-        positionMinutes: { VB: 20, CB: 0, HB: 0, VM: 0, CM: 20, HM: 0, A: 0 },
-        groupMinutes: { DEF: 20, MID: 20, ATT: 0 },
-        positionsPlayed: ['VB', 'CM'],
-        roleGroups: ['DEF', 'MID'],
-      },
-      'Spelare 2': {
-        totalMinutes: 20,
-        outfieldMinutes: 0,
-        benchMinutes: 0,
-        goalkeeperMinutes: 20,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 0, ATT: 0 },
-        positionsPlayed: [],
-        roleGroups: [],
-      },
-      'Spelare 3': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-      'Spelare 4': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-      'Spelare 5': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-      'Spelare 6': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-      'Spelare 7': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-      'Spelare 8': {
-        totalMinutes: 10,
-        outfieldMinutes: 10,
-        benchMinutes: 10,
-        positionMinutes: { VB: 0, CB: 0, HB: 0, VM: 0, CM: 10, HM: 0, A: 0 },
-        groupMinutes: { DEF: 0, MID: 10, ATT: 0 },
-      },
-    })
-
-    const plan = generateMatchPlan({
-      players,
-      periodCount: 1,
-      periodMinutes: 20,
-      formation: '2-3-1',
-      chunkMinutes: 10,
-      lockedGoalkeeperIds: [players[1].id],
-      priorPlayerStats,
-      seed: 701,
-      attempts: 32,
-    })
-    const summaryById = Object.fromEntries(plan.summaries.map((summary) => [summary.playerId, summary]))
-
-    expect(summaryById[players[0].id]?.totalMinutes).toBeLessThanOrEqual(10)
-    expect(summaryById[players[2].id]?.totalMinutes).toBeGreaterThanOrEqual(20)
-    expect(summaryById[players[3].id]?.totalMinutes).toBeGreaterThanOrEqual(20)
   })
 
   it('keeps previously benched players active in the next window for the Bill scenario', () => {
