@@ -602,21 +602,6 @@ function App() {
     }
   }
 
-  const handleShareViaWhatsApp = () => {
-    if (!plan) {
-      return
-    }
-
-    const shareUrl = createLineupShareUrl(generatedConfig, normalizedOverrides, liveEvents)
-    window.history.replaceState(null, '', shareUrl)
-    setShouldSyncShareUrl(true)
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(`Uppställning EIK:\n${shareUrl}`)}`,
-      '_blank',
-      'noopener,noreferrer',
-    )
-  }
-
   const handleApplyLiveEvent = (event: {
     type: 'temporary-out'
     playerId: string
@@ -734,9 +719,7 @@ function App() {
               playerOptions={playerOptions}
               rosterCount={rosterNames.length}
               isPending={isPending}
-              canShare={Boolean(plan)}
               onGenerate={handleGenerate}
-              onShareViaWhatsApp={handleShareViaWhatsApp}
             />
           </header>
         </section>
@@ -883,18 +866,14 @@ function SettingsPanel({
   playerOptions,
   rosterCount,
   isPending,
-  canShare,
   onGenerate,
-  onShareViaWhatsApp,
 }: {
   state: FormState
   dispatch: Dispatch<FormAction>
   playerOptions: string[]
   rosterCount: number
   isPending: boolean
-  canShare: boolean
   onGenerate: () => void
-  onShareViaWhatsApp: () => void
 }) {
   const showChunkRecommendation = rosterCount >= 10 && getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes) <= 2
   const substitutionOptions = getSubstitutionOptions(state.periodMinutes, state.chunkMinutes)
@@ -1090,14 +1069,6 @@ function SettingsPanel({
             className="inline-flex h-12 w-full items-center justify-center rounded-full bg-clay-400 px-6 font-display text-lg font-bold text-clay-900 transition hover:bg-clay-300 disabled:cursor-wait disabled:opacity-70 sm:w-auto"
           >
             {isPending ? 'Genererar...' : 'Generera uppställning'}
-          </button>
-          <button
-            type="button"
-            onClick={onShareViaWhatsApp}
-            disabled={!canShare}
-            className="inline-flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-white/5 px-6 font-display text-lg font-bold text-white transition hover:border-clay-300/40 hover:bg-clay-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-          >
-            Dela via WhatsApp
           </button>
         </div>
 

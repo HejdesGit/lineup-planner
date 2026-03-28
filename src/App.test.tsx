@@ -314,25 +314,6 @@ describe('App', () => {
     expect(getLineupParam()).toBe(syncedLineup)
   })
 
-  it('opens WhatsApp with the current share url in the message text', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-    const user = userEvent.setup()
-    render(<App />)
-
-    await user.click(screen.getByRole('button', { name: /dela via whatsapp/i }))
-
-    expect(openSpy).toHaveBeenCalledTimes(1)
-
-    const [openedUrl] = openSpy.mock.calls[0]
-    const whatsappUrl = new URL(openedUrl as string)
-    const message = whatsappUrl.searchParams.get('text')
-
-    expect(whatsappUrl.origin).toBe('https://wa.me')
-    expect(message).toContain('Uppställning EIK:')
-    expect(message).toContain(window.location.href)
-    expect(getLineupParam()).not.toBeNull()
-  })
-
   it('falls back to the default state when the shared link is invalid', async () => {
     setUrl('/?lineup=defekt')
 
