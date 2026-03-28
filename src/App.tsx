@@ -79,6 +79,8 @@ import {
   PERIOD_COUNT,
   PERIOD_COUNT_OPTIONS,
   PERIOD_MINUTE_OPTIONS,
+  ROLE_GROUPS,
+  type CarryOverPlayerStats,
   type FormationKey,
   type GeneratedConfig,
   type GoalkeeperSelections,
@@ -158,6 +160,7 @@ type FormAction =
   | { type: 'setPeriodMinutes'; value: number }
   | { type: 'setFormation'; value: FormationKey }
   | { type: 'setChunkMinutes'; value: number }
+  | { type: 'setGoalkeeperSelections'; value: GoalkeeperSelections }
   | { type: 'setGoalkeeperSelection'; periodIndex: number; value: string }
   | { type: 'setErrors'; value: string[] }
   | { type: 'clearErrors' }
@@ -178,6 +181,8 @@ interface InitialAppState {
   plan: MatchPlan | null
   periodOverrides: PeriodBoardOverrides
   liveEvents: LiveAdjustmentEvent[]
+  completedCupPlayerStats: CarryOverPlayerStats[]
+  completedCupMatchCount: number
   shouldSyncShareUrl: boolean
   selectedTimerPeriod: number
   activeMatchTimer: StoredActiveMatchTimer | null
@@ -236,6 +241,11 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, formation: action.value }
     case 'setChunkMinutes':
       return { ...state, chunkMinutes: action.value }
+    case 'setGoalkeeperSelections':
+      return {
+        ...state,
+        goalkeeperSelections: resizeGoalkeeperSelections(action.value, state.periodCount),
+      }
     case 'setGoalkeeperSelection':
       return {
         ...state,
@@ -260,6 +270,10 @@ function App() {
   const [plan, setPlan] = useState<MatchPlan | null>(initialState.plan)
   const [periodOverrides, setPeriodOverrides] = useState<PeriodBoardOverrides>(initialState.periodOverrides)
   const [liveEvents, setLiveEvents] = useState<LiveAdjustmentEvent[]>(initialState.liveEvents)
+  const [completedCupPlayerStats, setCompletedCupPlayerStats] = useState(
+    initialState.completedCupPlayerStats,
+  )
+  const [completedCupMatchCount, setCompletedCupMatchCount] = useState(initialState.completedCupMatchCount)
   const [shouldSyncShareUrl, setShouldSyncShareUrl] = useState(initialState.shouldSyncShareUrl)
   const [selectedTimerPeriod, setSelectedTimerPeriod] = useState(initialState.selectedTimerPeriod)
   const [activeMatchTimer, setActiveMatchTimer] = useState<StoredActiveMatchTimer | null>(
@@ -273,6 +287,7 @@ function App() {
 
   const rosterNames = useMemo(() => getRosterNames(formState.playerInput), [formState.playerInput])
   const playerOptions = rosterNames
+  const currentCupMatchNumber = completedCupMatchCount + 1
   const normalizedOverrides = useMemo(
     () => (plan ? normalizePeriodOverrides(plan, periodOverrides) : {}),
     [periodOverrides, plan],
@@ -339,6 +354,7 @@ function App() {
     [activeMatchTimer, matchTimeline, timerNow],
   )
   const hasGeneratedPlan = Boolean(displayPlan && plan)
+  const canAddCupMatch = Boolean(displayPlan && plan)
   const showFloatingMatchTimer = Boolean(matchProgress && matchTimeline && matchProgress.status !== 'idle')
   const showLiveNowPanel = Boolean(
     liveAvailability &&
@@ -505,6 +521,7 @@ function App() {
         formation: formState.formation,
         chunkMinutes: formState.chunkMinutes,
         lockedGoalkeeperIds: mapGoalkeeperSelectionsToIds(players, formState.goalkeeperSelections),
+        priorPlayerStats: completedCupPlayerStats,
         seed: Date.now(),
       })
       const nextGeneratedConfig = buildGeneratedConfig({
@@ -543,6 +560,111 @@ function App() {
       setActiveMatchTimer(null)
       setTimerNow(Date.now())
       setLiveError(null)
+    }
+  }
+
+  const handleAddCupMatch = () => {
+    if (!displayPlan) {
+      return
+    }
+
+    try {
+      const players = normalizePlayers(formState.playerInput)
+      const nextCompletedCupPlayerStats = mergeCarryOverPlayerStats(
+        completedCupPlayerStats,
+        buildCarryOverPlayerStats(displayPlan),
+      )
+      const nextGoalkeeperSelections = createGoalkeeperSelections(formState.periodCount)
+      const nextPlan = generateMatchPlan({
+        players,
+        periodCount: formState.periodCount,
+        periodMinutes: formState.periodMinutes,
+        formation: formState.formation,
+        chunkMinutes: formState.chunkMinutes,
+        lockedGoalkeeperIds: mapGoalkeeperSelectionsToIds(players, nextGoalkeeperSelections),
+        priorPlayerStats: nextCompletedCupPlayerStats,
+        seed: Date.now(),
+      })
+      const nextGeneratedConfig = buildGeneratedConfig({
+        players,
+        playerInput: formState.playerInput,
+        periodCount: formState.periodCount,
+        periodMinutes: formState.periodMinutes,
+        formation: formState.formation,
+        chunkMinutes: formState.chunkMinutes,
+        goalkeeperSelections: nextGoalkeeperSelections,
+        seed: nextPlan.seed,
+      })
+
+      dispatch({ type: 'clearErrors' })
+      dispatch({ type: 'setGoalkeeperSelections', value: nextGoalkeeperSelections })
+      startTransition(() => {
+        setGeneratedConfig(nextGeneratedConfig)
+        setPlan(nextPlan)
+        setPeriodOverrides({})
+        setLiveEvents([])
+        setCompletedCupPlayerStats(nextCompletedCupPlayerStats)
+        setCompletedCupMatchCount((currentCount) => currentCount + 1)
+        setShouldSyncShareUrl(true)
+        setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
+        setActiveMatchTimer(null)
+        setTimerNow(Date.now())
+        setLiveError(null)
+      })
+    } catch (error) {
+      dispatch({
+        type: 'setErrors',
+        value: [
+          error instanceof Error
+            ? error.message
+            : 'Något gick fel när nästa match skulle skapas.',
+        ],
+      })
+    }
+  }
+
+  const handleResetCup = () => {
+    try {
+      const players = normalizePlayers(formState.playerInput)
+      const nextPlan = generateMatchPlan({
+        players,
+        periodCount: formState.periodCount,
+        periodMinutes: formState.periodMinutes,
+        formation: formState.formation,
+        chunkMinutes: formState.chunkMinutes,
+        lockedGoalkeeperIds: mapGoalkeeperSelectionsToIds(players, formState.goalkeeperSelections),
+        seed: Date.now(),
+      })
+      const nextGeneratedConfig = buildGeneratedConfig({
+        players,
+        playerInput: formState.playerInput,
+        periodCount: formState.periodCount,
+        periodMinutes: formState.periodMinutes,
+        formation: formState.formation,
+        chunkMinutes: formState.chunkMinutes,
+        goalkeeperSelections: formState.goalkeeperSelections,
+        seed: nextPlan.seed,
+      })
+
+      dispatch({ type: 'clearErrors' })
+      startTransition(() => {
+        setGeneratedConfig(nextGeneratedConfig)
+        setPlan(nextPlan)
+        setPeriodOverrides({})
+        setLiveEvents([])
+        setCompletedCupPlayerStats([])
+        setCompletedCupMatchCount(0)
+        setShouldSyncShareUrl(true)
+        setSelectedTimerPeriod(DEFAULT_SELECTED_TIMER_PERIOD)
+        setActiveMatchTimer(null)
+        setTimerNow(Date.now())
+        setLiveError(null)
+      })
+    } catch (error) {
+      dispatch({
+        type: 'setErrors',
+        value: [error instanceof Error ? error.message : 'Något gick fel när cupen skulle nollställas.'],
+      })
     }
   }
 
@@ -600,21 +722,6 @@ function App() {
       setActiveMatchTimer(null)
       setTimerNow(Date.now())
     }
-  }
-
-  const handleShareViaWhatsApp = () => {
-    if (!plan) {
-      return
-    }
-
-    const shareUrl = createLineupShareUrl(generatedConfig, normalizedOverrides, liveEvents)
-    window.history.replaceState(null, '', shareUrl)
-    setShouldSyncShareUrl(true)
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(`Uppställning EIK:\n${shareUrl}`)}`,
-      '_blank',
-      'noopener,noreferrer',
-    )
   }
 
   const handleApplyLiveEvent = (event: {
@@ -734,9 +841,12 @@ function App() {
               playerOptions={playerOptions}
               rosterCount={rosterNames.length}
               isPending={isPending}
-              canShare={Boolean(plan)}
+              currentCupMatchNumber={currentCupMatchNumber}
+              completedCupMatchCount={completedCupMatchCount}
+              canAddCupMatch={canAddCupMatch}
               onGenerate={handleGenerate}
-              onShareViaWhatsApp={handleShareViaWhatsApp}
+              onAddCupMatch={handleAddCupMatch}
+              onResetCup={handleResetCup}
             />
           </header>
         </section>
@@ -747,6 +857,8 @@ function App() {
               <MatchOverview
                 plan={displayPlan}
                 playerNameById={playerNameById}
+                currentCupMatchNumber={currentCupMatchNumber}
+                completedCupMatchCount={completedCupMatchCount}
                 matchProgress={matchProgress}
                 matchTimeline={matchTimeline}
                 selectedTimerPeriod={selectedTimerPeriod}
@@ -883,18 +995,24 @@ function SettingsPanel({
   playerOptions,
   rosterCount,
   isPending,
-  canShare,
+  currentCupMatchNumber,
+  completedCupMatchCount,
+  canAddCupMatch,
   onGenerate,
-  onShareViaWhatsApp,
+  onAddCupMatch,
+  onResetCup,
 }: {
   state: FormState
   dispatch: Dispatch<FormAction>
   playerOptions: string[]
   rosterCount: number
   isPending: boolean
-  canShare: boolean
+  currentCupMatchNumber: number
+  completedCupMatchCount: number
+  canAddCupMatch: boolean
   onGenerate: () => void
-  onShareViaWhatsApp: () => void
+  onAddCupMatch: () => void
+  onResetCup: () => void
 }) {
   const showChunkRecommendation = rosterCount >= 10 && getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes) <= 2
   const substitutionOptions = getSubstitutionOptions(state.periodMinutes, state.chunkMinutes)
@@ -908,15 +1026,27 @@ function SettingsPanel({
             Matchinställningar
           </h2>
           <p className="mt-2 max-w-md text-sm text-stone-300">
-            Skriv namn, välj formation och justera hur ofta du vill kunna byta.
+            Skriv namn, välj formation och justera hur ofta du vill kunna byta. Lägg sedan till nästa match när den förra är klar.
           </p>
         </div>
         <div className="w-fit rounded-full border border-clay-300/20 bg-clay-500/10 px-3 py-1 font-mono text-xs text-clay-100">
-          {state.periodCount} {state.periodCount === 1 ? 'period' : 'perioder'}
+          Match {currentCupMatchNumber} · {state.periodCount} {state.periodCount === 1 ? 'period' : 'perioder'}
         </div>
       </div>
 
       <div className="space-y-5">
+        {completedCupMatchCount > 0 ? (
+          <div className="rounded-[1.25rem] border border-sky-300/20 bg-sky-400/10 px-4 py-3 text-sm text-sky-50">
+            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-sky-100/80">
+              Cup-läge
+            </p>
+            <p className="mt-1">
+              {completedCupMatchCount} {completedCupMatchCount === 1 ? 'match' : 'matcher'} är sparade.
+              Nästa generering väger in tidigare speltid, bänktid och vilka roller spelarna redan har provat.
+            </p>
+          </div>
+        ) : null}
+
         <div className="space-y-2">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <label
@@ -1093,12 +1223,21 @@ function SettingsPanel({
           </button>
           <button
             type="button"
-            onClick={onShareViaWhatsApp}
-            disabled={!canShare}
+            onClick={onAddCupMatch}
+            disabled={!canAddCupMatch}
             className="inline-flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-white/5 px-6 font-display text-lg font-bold text-white transition hover:border-clay-300/40 hover:bg-clay-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
           >
-            Dela via WhatsApp
+            Lägg till match
           </button>
+          {completedCupMatchCount > 0 ? (
+            <button
+              type="button"
+              onClick={onResetCup}
+              className="inline-flex h-12 w-full items-center justify-center rounded-full border border-white/10 bg-black/20 px-6 font-display text-lg font-bold text-stone-200 transition hover:border-red-300/30 hover:bg-red-950/30 hover:text-white sm:w-auto"
+            >
+              Ny cup
+            </button>
+          ) : null}
         </div>
 
         {state.errors.length > 0 ? (
@@ -1401,6 +1540,8 @@ function LiveNowPanel({
 function MatchOverview({
   plan,
   playerNameById,
+  currentCupMatchNumber,
+  completedCupMatchCount,
   matchProgress,
   matchTimeline,
   selectedTimerPeriod,
@@ -1413,6 +1554,8 @@ function MatchOverview({
 }: {
   plan: MatchPlan
   playerNameById: Record<string, string>
+  currentCupMatchNumber: number
+  completedCupMatchCount: number
   matchProgress: MatchProgress | null
   matchTimeline: MatchTimeline | null
   selectedTimerPeriod: number
@@ -1438,10 +1581,18 @@ function MatchOverview({
               {plan.periodMinutes} min/period
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <SummaryChip
               label="Målvakter"
               value={plan.goalkeepers.map((goalkeeperId) => playerNameById[goalkeeperId]).join(', ')}
+            />
+            <SummaryChip
+              label="Cup"
+              value={
+                completedCupMatchCount > 0
+                  ? `Match ${currentCupMatchNumber} · ${completedCupMatchCount} klara`
+                  : `Match ${currentCupMatchNumber}`
+              }
             />
             <SummaryChip label="Formation" value={plan.formation} />
             <SummaryChip label="Spelare" value={`${plan.summaries.length} st`} />
@@ -3222,6 +3373,8 @@ function createDefaultAppState(): InitialAppState {
     plan: initialPlan,
     periodOverrides: {},
     liveEvents: [],
+    completedCupPlayerStats: [],
+    completedCupMatchCount: 0,
     shouldSyncShareUrl: false,
     selectedTimerPeriod: DEFAULT_SELECTED_TIMER_PERIOD,
     activeMatchTimer: null,
@@ -3239,6 +3392,8 @@ function createHydratedStateFromSnapshot(encodedSnapshot: string) {
     plan: hydratedPlan,
     periodOverrides: hydratedOverrides,
     liveEvents,
+    completedCupPlayerStats: [],
+    completedCupMatchCount: 0,
   }
 }
 
@@ -3442,6 +3597,140 @@ function normalizePlayers(input: string): Player[] {
     id: `player-${index + 1}`,
     name,
   }))
+}
+
+function buildCarryOverPlayerStats(plan: MatchPlan): CarryOverPlayerStats[] {
+  const totalMatchMinutes = plan.periodMinutes * plan.periods.length
+  const statsByPlayerId = Object.fromEntries(
+    plan.summaries.map((summary) => [
+      summary.playerId,
+      {
+        name: summary.name,
+        totalMinutes: 0,
+        outfieldMinutes: 0,
+        benchMinutes: 0,
+        goalkeeperMinutes: 0,
+        positionMinutes: createEmptyCarryOverPositionMinutes(),
+        groupMinutes: createEmptyCarryOverGroupMinutes(),
+        positionsPlayed: [] as OutfieldPosition[],
+        roleGroups: [] as Array<'DEF' | 'MID' | 'ATT'>,
+      },
+    ]),
+  ) as Record<string, CarryOverPlayerStats>
+
+  for (const period of plan.periods) {
+    for (const chunk of period.chunks) {
+      const activePlayerIds = new Set(chunk.activePlayerIds)
+
+      for (const [playerId, playerStats] of Object.entries(statsByPlayerId)) {
+        if (activePlayerIds.has(playerId)) {
+          playerStats.totalMinutes += chunk.durationMinutes
+        } else {
+          playerStats.benchMinutes += chunk.durationMinutes
+        }
+      }
+
+      const goalkeeperStats = statsByPlayerId[chunk.goalkeeperId]
+      if (goalkeeperStats) {
+        goalkeeperStats.goalkeeperMinutes += chunk.durationMinutes
+      }
+
+      for (const position of period.positions) {
+        const playerId = chunk.lineup[position]
+        if (!playerId) {
+          continue
+        }
+
+        const playerStats = statsByPlayerId[playerId]
+        if (!playerStats) {
+          continue
+        }
+
+        playerStats.outfieldMinutes += chunk.durationMinutes
+        playerStats.positionMinutes[position] += chunk.durationMinutes
+        playerStats.groupMinutes[ROLE_GROUPS[position]] += chunk.durationMinutes
+      }
+    }
+  }
+
+  return plan.summaries.map((summary) => {
+    const playerStats = statsByPlayerId[summary.playerId]
+    const totalMinutes = Math.min(playerStats.totalMinutes, totalMatchMinutes)
+    const benchMinutes = Math.max(totalMatchMinutes - totalMinutes, 0)
+
+    return {
+      ...playerStats,
+      totalMinutes,
+      benchMinutes,
+      positionsPlayed: (Object.entries(playerStats.positionMinutes) as Array<[OutfieldPosition, number]>)
+        .filter(([, minutes]) => minutes > 0)
+        .map(([position]) => position),
+      roleGroups: (Object.entries(playerStats.groupMinutes) as Array<['DEF' | 'MID' | 'ATT', number]>)
+        .filter(([, minutes]) => minutes > 0)
+        .map(([group]) => group),
+    }
+  })
+}
+
+function mergeCarryOverPlayerStats(
+  existingStats: CarryOverPlayerStats[],
+  nextStats: CarryOverPlayerStats[],
+): CarryOverPlayerStats[] {
+  const mergedByName = new Map<string, CarryOverPlayerStats>()
+
+  for (const stats of [...existingStats, ...nextStats]) {
+    const normalizedName = normalizeCupPlayerName(stats.name)
+    const current = mergedByName.get(normalizedName)
+
+    if (!current) {
+      mergedByName.set(normalizedName, cloneCarryOverPlayerStats(stats))
+      continue
+    }
+
+    current.totalMinutes += stats.totalMinutes
+    current.outfieldMinutes += stats.outfieldMinutes
+    current.benchMinutes += stats.benchMinutes
+    current.goalkeeperMinutes += stats.goalkeeperMinutes
+
+    for (const position of Object.keys(current.positionMinutes) as OutfieldPosition[]) {
+      current.positionMinutes[position] += stats.positionMinutes[position] ?? 0
+    }
+
+    for (const group of Object.keys(current.groupMinutes) as Array<'DEF' | 'MID' | 'ATT'>) {
+      current.groupMinutes[group] += stats.groupMinutes[group] ?? 0
+    }
+
+    current.positionsPlayed = Array.from(
+      new Set([...current.positionsPlayed, ...stats.positionsPlayed]),
+    ) as OutfieldPosition[]
+    current.roleGroups = Array.from(new Set([...current.roleGroups, ...stats.roleGroups])) as Array<
+      'DEF' | 'MID' | 'ATT'
+    >
+  }
+
+  return [...mergedByName.values()].sort((left, right) => left.name.localeCompare(right.name, 'sv-SE'))
+}
+
+function cloneCarryOverPlayerStats(stats: CarryOverPlayerStats): CarryOverPlayerStats {
+  return {
+    ...stats,
+    positionMinutes: { ...stats.positionMinutes },
+    groupMinutes: { ...stats.groupMinutes },
+    positionsPlayed: [...stats.positionsPlayed],
+    roleGroups: [...stats.roleGroups],
+  }
+}
+
+function createEmptyCarryOverPositionMinutes() {
+  return { VB: 0, CB: 0, HB: 0, VM: 0, CM: 0, HM: 0, A: 0 } satisfies Record<OutfieldPosition, number>
+}
+
+function createEmptyCarryOverGroupMinutes() {
+  return { DEF: 0, MID: 0, ATT: 0 } satisfies Record<'DEF' | 'MID' | 'ATT', number>
+}
+
+function normalizeCupPlayerName(name: string) {
+  return name.trim().toLocaleLowerCase('sv-SE')
 }
 
 function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinutes: number) {

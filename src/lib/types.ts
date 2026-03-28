@@ -85,6 +85,18 @@ export interface Player {
   name: string
 }
 
+export interface CarryOverPlayerStats {
+  name: string
+  totalMinutes: number
+  outfieldMinutes: number
+  benchMinutes: number
+  goalkeeperMinutes: number
+  positionMinutes: Record<OutfieldPosition, number>
+  groupMinutes: Record<RoleGroup, number>
+  positionsPlayed: OutfieldPosition[]
+  roleGroups: RoleGroup[]
+}
+
 export interface MatchConfig {
   players: Player[]
   periodCount?: number
@@ -92,6 +104,7 @@ export interface MatchConfig {
   formation: FormationKey
   chunkMinutes: number
   lockedGoalkeeperIds?: Array<string | null>
+  priorPlayerStats?: CarryOverPlayerStats[]
   seed?: number
   attempts?: number
 }
