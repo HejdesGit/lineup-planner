@@ -302,6 +302,36 @@ describe('createAuditRecord', () => {
     expect(record.flags).not.toContain('bench-spread-over-limit')
   })
 
+  it('captures the single-period short-window continuity fix in audit player metrics', () => {
+    const record = createAuditRecord(
+      {
+        scenarioId:
+          'players-10_periods-1_period-20_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
+        playerCount: 10,
+        periodCount: 1,
+        periodMinutes: 20,
+        formation: '2-3-1',
+        substitutionsPerPeriod: 4,
+        chunkMinutes: 5,
+        goalkeeperMode: 'auto',
+        rosterOrder: 'canonical',
+        rosterNames: [],
+        liveAdjustmentPattern: 'none',
+      },
+      1,
+    )
+    const gunnar = record.derivedMetrics.playerMetrics.find((metrics) => metrics.name === 'Gunnar')
+
+    expect(gunnar).toBeDefined()
+    expect(gunnar).toMatchObject({
+      isolatedPlayBlocks: 0,
+      longestPlayStreakWindows: 2,
+      chunkStates: ['B', 'P', 'P', 'B'],
+    })
+    expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('ok')
+    expect(record.flags).not.toContain('isolated-play-blocks')
+  })
+
   it('does not flag the 9-player high-rotation case after the short-window continuity rebalance', () => {
     const record = createAuditRecord(
       {

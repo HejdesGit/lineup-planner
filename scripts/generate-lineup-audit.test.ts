@@ -226,6 +226,57 @@ describe('generate-lineup-audit CLI', () => {
     expect(denseFlagSeed.flags).toContain('isolated-play-blocks')
   })
 
+  it('exports the single-period short-window continuity improvement without isolated-play flags', () => {
+    const outDir = mkdtempSync(path.join(os.tmpdir(), 'lineup-audit-'))
+    tempDirs.push(outDir)
+
+    execFileSync(process.execPath, [
+      tsxCliPath,
+      path.join(repoRoot, 'scripts', 'generate-lineup-audit.ts'),
+      `--outDir=${outDir}`,
+      '--playerCounts=10',
+      '--periodCounts=1',
+      '--periodMinutes=20',
+      '--formations=2-3-1',
+      '--substitutions=4',
+      '--goalkeeperModes=auto',
+      '--rosterOrders=canonical',
+      '--seeds=1',
+    ], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    })
+
+    const seed = readJson<{
+      derivedMetrics: {
+        isolatedPlayBlockSeverity: string
+        playerMetrics: Array<{
+          name: string
+          isolatedPlayBlocks: number
+          longestPlayStreakWindows: number
+          chunkStates: Array<'P' | 'B'>
+        }>
+      }
+      flags: string[]
+    }>(
+      path.join(
+        outDir,
+        'scenarios',
+        'players-10_periods-1_period-20_formation-2-3-1_subs-4_gk-auto_roster-canonical_live-none',
+        'seed-1.json',
+      ),
+    )
+    const gunnar = seed.derivedMetrics.playerMetrics.find((metrics) => metrics.name === 'Gunnar')
+
+    expect(seed.derivedMetrics.isolatedPlayBlockSeverity).toBe('ok')
+    expect(seed.flags).toEqual([])
+    expect(gunnar).toMatchObject({
+      isolatedPlayBlocks: 0,
+      longestPlayStreakWindows: 2,
+      chunkStates: ['B', 'P', 'P', 'B'],
+    })
+  })
+
   it('keeps overlapping audit live-pattern semantics aligned with live scenario presets', () => {
     const patternToPreset = {
       'single-temporary-out': {
