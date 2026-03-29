@@ -1246,7 +1246,9 @@ function selectInPeriodPlayers({
     const criticalGap = Math.max(remainingNeed - futureAfterCurrent, 0)
     const shortagePressure = remainingNeed / Math.max(remainingOpportunities, 1)
     const shortWindowSinglePlayProtection =
-      policy.mode === 'short-multi-period' && chunk.durationMinutes <= 5 && history.playStreak === 1
+      (policy.mode === 'short-multi-period' || policy.mode === 'single-period') &&
+      chunk.durationMinutes <= 5 &&
+      history.playStreak === 1
         ? 110
         : 0
     const largeRosterBenchRecoveryBoost =

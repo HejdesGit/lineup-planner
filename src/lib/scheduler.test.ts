@@ -288,6 +288,36 @@ describe('generateMatchPlan', () => {
     }
   })
 
+  it('avoids swapping out players immediately after a single 5-minute stint in a one-period match', () => {
+    const players: Player[] = [
+      { id: 'p-1', name: 'Adam' },
+      { id: 'p-2', name: 'Anton' },
+      { id: 'p-3', name: 'Bill' },
+      { id: 'p-4', name: 'Dante' },
+      { id: 'p-5', name: 'David' },
+      { id: 'p-6', name: 'Elias' },
+      { id: 'p-7', name: 'Emil' },
+      { id: 'p-8', name: 'Gunnar' },
+      { id: 'p-9', name: 'Henry' },
+      { id: 'p-10', name: 'Jax' },
+    ]
+    const plan = generateMatchPlan({
+      players,
+      periodCount: 1,
+      periodMinutes: 20,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [null],
+      seed: 888098633,
+      attempts: 72,
+    })
+
+    const gunnar = players.find((player) => player.name === 'Gunnar')
+
+    expect(gunnar).toBeDefined()
+    expect(getPlayerChunkStates(plan, gunnar!.id)).toEqual(['B', 'P', 'P', 'B'])
+  })
+
   it('keeps continuing outfielders on the same positions within a period', () => {
     const players = createPlayers(9)
     const plan = generateMatchPlan({
