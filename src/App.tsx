@@ -31,7 +31,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
-import { AlertTriangle, ArrowLeftRight, Lock, LockOpen, UserMinus, UserPlus } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Bandage, Lock, LockOpen, UserPlus } from 'lucide-react'
 import {
   applyLiveAdjustmentEvents,
   createInitialAvailabilityState,
@@ -2441,7 +2441,7 @@ function LivePositionBadge({
         className="absolute -left-2 -top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-black/20 text-stone-300 backdrop-blur transition hover:border-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 sm:-left-2.5 sm:-top-2.5 sm:h-9 sm:w-9"
         aria-label={`Markera ${player} som tillfälligt ute på ${label}`}
       >
-        <UserMinus className="h-3 w-3 sm:h-4 sm:w-4" />
+        <Bandage className="h-3 w-3 sm:h-4 sm:w-4" />
       </button>
       <button
         type="button"
