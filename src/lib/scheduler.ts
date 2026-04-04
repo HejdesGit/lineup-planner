@@ -5,6 +5,7 @@ import {
   PERIOD_COUNT_OPTIONS,
   PERIOD_MINUTE_OPTIONS,
   ROLE_GROUPS,
+  type ChunkPlan,
   type ChunkSubstitution,
   type FormationKey,
   type Lineup,
@@ -545,7 +546,7 @@ function runCandidatePlan(
 
   for (let periodIndex = 0; periodIndex < periodCount; periodIndex += 1) {
     const goalkeeperId = goalkeepers[periodIndex]
-    const chunks = includeOutput ? [] : null
+    const chunks: ChunkPlan[] | null = includeOutput ? [] : null
     const substituteSet = new Set<string>()
     const periodChunks = context.chunksByPeriod[periodIndex] ?? []
     let previousLineup: Lineup | null = null
