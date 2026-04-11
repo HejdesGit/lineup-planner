@@ -15,7 +15,7 @@ describe('createAuditScenarios', () => {
   it('builds the full default UI matrix with stable scenario ids', () => {
     const scenarios = createAuditScenarios()
 
-    expect(scenarios).toHaveLength(4800)
+    expect(scenarios).toHaveLength(6400)
     expect(scenarios[0]?.scenarioId).toBe(
       'players-8_periods-1_period-5_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
     )
@@ -52,6 +52,55 @@ describe('createAuditScenarios', () => {
       'players-10_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
       'players-10_periods-3_period-20_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-quick-return',
     ])
+  })
+
+  it('includes 25-minute periods in the default audit matrix', () => {
+    const scenarios = createAuditScenarios({
+      playerCounts: [10],
+      periodCounts: [3],
+      periodMinutes: [25],
+      formations: ['2-3-1'],
+      substitutions: [2],
+      goalkeeperModes: ['auto'],
+      rosterOrders: ['canonical'],
+      liveAdjustmentPatterns: ['none'],
+    })
+
+    expect(scenarios).toHaveLength(1)
+    expect(scenarios[0]?.scenarioId).toBe(
+      'players-10_periods-3_period-25_formation-2-3-1_subs-2_gk-auto_roster-canonical_live-none',
+    )
+    expect(scenarios[0]?.chunkMinutes).toBe(12.5)
+  })
+
+  it('includes a 5-substitution scenario for 25-minute periods only', () => {
+    const supportedScenario = createAuditScenarios({
+      playerCounts: [10],
+      periodCounts: [3],
+      periodMinutes: [25],
+      formations: ['2-3-1'],
+      substitutions: [5],
+      goalkeeperModes: ['auto'],
+      rosterOrders: ['canonical'],
+      liveAdjustmentPatterns: ['none'],
+    })
+    const unsupportedScenario = createAuditScenarios({
+      playerCounts: [10],
+      periodCounts: [3],
+      periodMinutes: [20],
+      formations: ['2-3-1'],
+      substitutions: [5],
+      goalkeeperModes: ['auto'],
+      rosterOrders: ['canonical'],
+      liveAdjustmentPatterns: ['none'],
+    })
+
+    expect(supportedScenario).toHaveLength(1)
+    expect(supportedScenario[0]?.scenarioId).toBe(
+      'players-10_periods-3_period-25_formation-2-3-1_subs-5_gk-auto_roster-canonical_live-none',
+    )
+    expect(supportedScenario[0]?.chunkMinutes).toBe(5)
+    expect(unsupportedScenario).toHaveLength(0)
   })
 })
 
@@ -624,7 +673,7 @@ function createStandardScenario({
   periodCount?: number
   periodMinutes: number
   formation: '2-3-1' | '3-2-1'
-  substitutionsPerPeriod: 2 | 3 | 4
+  substitutionsPerPeriod: 2 | 3 | 4 | 5
 }) {
   return {
     scenarioId: buildScenarioId({

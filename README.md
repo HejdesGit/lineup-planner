@@ -6,9 +6,9 @@ Appen ar byggd for att snabbt ta fram ett spelbart matchschema dar speltid, bank
 
 ## Funktioner
 
-- Genererar uppstallning for 3 perioder med valbart matchformat: `3 x 15` eller `3 x 20` minuter.
+- Genererar uppstallning for 3 perioder med valbart matchformat: `3 x 15`, `3 x 20` eller `3 x 25` minuter.
 - Stod for formationerna `2-3-1` och `3-2-1`.
-- Planerar `2`, `3` eller `4` byten per period beroende pa matchformat.
+- Planerar `2`, `3`, `4` eller `5` byten per period beroende pa matchformat.
 - Later dig lasa malvakt per period eller lata appen valja automatiskt.
 - Visar spelartid, banktid, malvaktsperioder och roller per spelare.
 - Stodjer manuella justeringar via drag-and-drop pa formationsbradet.

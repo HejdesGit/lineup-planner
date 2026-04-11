@@ -9,6 +9,7 @@ import { createNamedPlayers, getRosterNames, type RosterOrder } from './playerPo
 import {
   SUBSTITUTIONS_PER_PERIOD_OPTIONS,
   getChunkMinutesForSubstitutions,
+  getSupportedSubstitutionsPerPeriodOptions,
   getSubstitutionsPerPeriod,
   type SubstitutionsPerPeriod,
 } from './substitutions'
@@ -265,8 +266,12 @@ export function createAuditScenarios(filters: AuditScenarioFilters = {}): AuditS
   for (const playerCount of playerCounts) {
     for (const periodCount of periodCounts) {
       for (const periodMinutes of periodMinutesValues) {
+        const compatibleSubstitutions = substitutions.filter((substitutionsPerPeriod) =>
+          getSupportedSubstitutionsPerPeriodOptions(periodMinutes).includes(substitutionsPerPeriod),
+        )
+
         for (const formation of formations) {
-          for (const substitutionsPerPeriod of substitutions) {
+          for (const substitutionsPerPeriod of compatibleSubstitutions) {
             const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
             for (const goalkeeperMode of goalkeeperModes) {
               for (const rosterOrder of rosterOrders) {

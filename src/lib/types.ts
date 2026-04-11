@@ -1,6 +1,6 @@
 export const PERIOD_COUNT = 3
 export const PERIOD_COUNT_OPTIONS = [1, 2, 3, 4] as const
-export const PERIOD_MINUTE_OPTIONS = [5, 10, 15, 20] as const
+export const PERIOD_MINUTE_OPTIONS = [5, 10, 15, 20, 25] as const
 export const FORMATION_PRESETS = {
   '2-3-1': {
     label: '2-3-1',

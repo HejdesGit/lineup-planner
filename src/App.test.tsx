@@ -122,7 +122,7 @@ describe('App', () => {
     expect(screen.queryByText(/kan väntan bli lång/i)).not.toBeInTheDocument()
   })
 
-  it('shows curated chunk options for 3x20 and 3x15', async () => {
+  it('shows curated chunk options for 3x20, 3x15 and 3x25', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -137,6 +137,15 @@ describe('App', () => {
     expect(within(chunkSelect).getByRole('option', { name: '2 byten (7:30+7:30)' })).toBeInTheDocument()
     expect(within(chunkSelect).getByRole('option', { name: '3 byten (5+5+5)' })).toBeInTheDocument()
     expect(within(chunkSelect).getByRole('option', { name: '4 byten (3:45+3:45+3:45+3:45)' })).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText(/matchformat/i), '25')
+
+    expect(within(chunkSelect).getByRole('option', { name: '2 byten (12:30+12:30)' })).toBeInTheDocument()
+    expect(within(chunkSelect).getByRole('option', { name: '3 byten (8:20+8:20+8:20)' })).toBeInTheDocument()
+    expect(
+      within(chunkSelect).getByRole('option', { name: '4 byten (6:15+6:15+6:15+6:15)' }),
+    ).toBeInTheDocument()
+    expect(within(chunkSelect).getByRole('option', { name: '5 byten (5+5+5+5+5)' })).toBeInTheDocument()
   })
 
   it('normalizes antal byten when matchformat changes to a different option set', async () => {

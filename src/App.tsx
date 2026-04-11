@@ -75,6 +75,12 @@ import {
   type StoredActiveMatchTimer,
 } from './lib/matchTimer'
 import {
+  areMinuteValuesEqual,
+  getChunkMinutesForSubstitutions,
+  getSubstitutionsPerPeriod,
+  getSupportedSubstitutionsPerPeriodOptions,
+} from './lib/substitutions'
+import {
   FORMATION_PRESETS,
   PERIOD_COUNT,
   PERIOD_COUNT_OPTIONS,
@@ -135,7 +141,6 @@ const DEFAULT_SHARE_SEED = 20260314
 const DEFAULT_SELECTED_TIMER_PERIOD = 1
 const SHARE_LINK_ERROR_MESSAGE = 'Ogiltig delningslänk. Standarduppställningen visas i stället.'
 const LIVE_NOW_SECTION_ID = 'section-live-now'
-const SUBSTITUTIONS_PER_PERIOD_OPTIONS = [2, 3, 4] as const
 const BOTTOM_TAB_ITEMS = [
   { id: 'pre-match', label: 'Inför match', sectionId: 'section-pre-match' },
   { id: 'match-mode', label: 'Matchläge', sectionId: 'section-match-mode' },
@@ -853,7 +858,7 @@ function HeroPanel() {
         </h1>
         <p className="max-w-2xl text-sm leading-7 text-stone-300 sm:text-base sm:leading-6">
           Målvakten hålls utanför formationen. Du väljer mellan 2-3-1 och 3-2-1, samt
-          2, 3 eller 4 planerade byten per period.
+          2, 3, 4 eller 5 planerade byten per period.
         </p>
       </div>
     </div>
@@ -1014,7 +1019,7 @@ function SettingsPanel({
               </p>
               <p className="mt-1">
                 Med {rosterCount} spelare och {getSubstitutionsPerPeriod(state.periodMinutes, state.chunkMinutes)} byten
-                per period kan väntan bli lång. Prova gärna 3 eller 4 byten om du vill korta bänkpassen.
+                per period kan väntan bli lång. Prova gärna fler byten om du vill korta bänkpassen.
               </p>
             </div>
           ) : null}
@@ -3427,7 +3432,7 @@ function getMinuteBreakdown(summary: MatchPlan['summaries'][number], periodMinut
 }
 
 function getSubstitutionOptions(periodMinutes: number, currentChunkMinutes?: number) {
-  const options = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) => {
+  const options = getSupportedSubstitutionsPerPeriodOptions(periodMinutes).map((substitutionsPerPeriod) => {
     const chunkMinutes = getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod)
 
     return {
@@ -3529,8 +3534,8 @@ function getChunkAnchorId(period: number, chunkIndex: number) {
 }
 
 function getNormalizedChunkMinutes(periodMinutes: number, currentChunkMinutes: number) {
-  const supportedChunkMinutes = SUBSTITUTIONS_PER_PERIOD_OPTIONS.map((substitutionsPerPeriod) =>
-    getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
+  const supportedChunkMinutes = getSupportedSubstitutionsPerPeriodOptions(periodMinutes).map(
+    (substitutionsPerPeriod) => getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod),
   )
 
   return supportedChunkMinutes.some((value) => areMinuteValuesEqual(value, currentChunkMinutes))
@@ -3619,25 +3624,6 @@ function splitMinutesAndSeconds(value: number) {
   const seconds = totalSeconds % 60
 
   return { minutes, seconds }
-}
-
-function getChunkMinutesForSubstitutions(
-  periodMinutes: number,
-  substitutionsPerPeriod: (typeof SUBSTITUTIONS_PER_PERIOD_OPTIONS)[number],
-) {
-  return periodMinutes / substitutionsPerPeriod
-}
-
-function getSubstitutionsPerPeriod(periodMinutes: number, chunkMinutes: number) {
-  const match = SUBSTITUTIONS_PER_PERIOD_OPTIONS.find((substitutionsPerPeriod) =>
-    areMinuteValuesEqual(getChunkMinutesForSubstitutions(periodMinutes, substitutionsPerPeriod), chunkMinutes),
-  )
-
-  return match ?? 2
-}
-
-function areMinuteValuesEqual(left: number, right: number) {
-  return Math.abs(left - right) < 0.001
 }
 
 function getRosterNames(input: string) {

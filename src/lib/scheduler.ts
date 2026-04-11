@@ -411,7 +411,7 @@ function validateConfig(
     !Number.isInteger(periodMinutes) ||
     !PERIOD_MINUTE_OPTIONS.includes(periodMinutes as (typeof PERIOD_MINUTE_OPTIONS)[number])
   ) {
-    throw new Error('Matchtiden måste vara 5, 10, 15 eller 20 minuter per period.')
+    throw new Error('Matchtiden måste vara 5, 10, 15, 20 eller 25 minuter per period.')
   }
 
   if (!(formation in FORMATION_PRESETS)) {

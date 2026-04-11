@@ -144,7 +144,7 @@ describe('generateMatchPlan', () => {
   for (const formation of ['2-3-1', '3-2-1'] as FormationKey[]) {
     for (const chunkMinutes of [5, 7, 10]) {
       for (const playerCount of [8, 9, 10, 11, 12]) {
-        for (const periodMinutes of [15, 20] as const) {
+        for (const periodMinutes of [15, 20, 25] as const) {
           it(`creates a valid ${formation} plan for ${playerCount} players at 3x${periodMinutes} with ${chunkMinutes} minute windows`, () => {
             const players = createPlayers(playerCount)
             const plan = generateMatchPlan({
@@ -826,6 +826,25 @@ describe('scheduler scoring calibration', () => {
     const normalized = getPlanScoreBreakdown(plan, 'normalized')
 
     expect(normalized.components.minuteSpreadPenalty).toBeLessThanOrEqual(chunkMinutes)
+  })
+
+  it('supports 5 substitutions for 25-minute periods via 5-minute chunks', () => {
+    const players = createPlayers(10)
+    const plan = generateMatchPlan({
+      players,
+      periodMinutes: 25,
+      formation: '2-3-1',
+      chunkMinutes: 5,
+      lockedGoalkeeperIds: [null, null, null],
+      seed: 2525,
+      attempts: 16,
+    })
+
+    expect(plan.periods).toHaveLength(3)
+    for (const period of plan.periods) {
+      expect(period.chunks).toHaveLength(5)
+      expect(period.chunks.every((chunk) => chunk.durationMinutes === 5)).toBe(true)
+    }
   })
 })
 
