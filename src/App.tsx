@@ -188,6 +188,63 @@ interface InitialAppState {
   activeMatchTimer: StoredActiveMatchTimer | null
 }
 
+type ApplyLiveEventInput =
+  | {
+      type: 'temporary-out'
+      playerId: string
+      replacementPlayerId: string
+      role: LiveAdjustmentRole
+    }
+  | {
+      type: 'return'
+      playerId: string
+      replacementPlayerId: string
+      role: LiveAdjustmentRole
+    }
+  | {
+      type: 'position-swap'
+      playerId: string
+      targetPlayerId: string
+    }
+
+interface AppController {
+  activeBottomTab: BottomTabId
+  canSelectTimerPeriod: boolean
+  dispatch: Dispatch<FormAction>
+  displayPlan: MatchPlan | null
+  formState: FormState
+  hasGeneratedPlan: boolean
+  isPending: boolean
+  liveAvailability: LiveAvailabilityState | null
+  liveError: string | null
+  matchProgress: MatchProgress | null
+  matchTimeline: MatchTimeline | null
+  normalizedOverrides: PeriodBoardOverrides
+  plan: MatchPlan | null
+  playerNameById: Record<string, string>
+  playerOptions: string[]
+  rosterCount: number
+  selectedTimerPeriod: number
+  showFloatingMatchTimer: boolean
+  showLiveNowPanel: boolean
+  unavailableRoleById: Record<string, LiveAdjustmentRole>
+  handleApplyLiveEvent: (event: ApplyLiveEventInput) => void
+  handleGenerate: () => void
+  handlePauseMatch: () => void
+  handleResetMatchTimer: () => void
+  handleResumeMatch: () => void
+  handleScrollToLiveNowSection: () => void
+  handleSelectBottomTab: (tabId: BottomTabId) => void
+  handleSelectTimerPeriod: (periodNumber: number) => void
+  handleStartMatch: () => void
+  handleSwapPeriodSlots: (
+    periodNumber: number,
+    fallbackAssignments: Record<BoardSlotId, string>,
+    sourceSlot: BoardSlotId,
+    targetSlot: BoardSlotId,
+  ) => void
+}
+
 interface PositionSwapCandidate {
   playerId: string
   position: string
@@ -258,6 +315,12 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 function App() {
+  const app = useAppController()
+
+  return <AppShell app={app} />
+}
+
+function useAppController(): AppController {
   const [initialState] = useState(createInitialAppState)
   const [formState, dispatch] = useReducer(formReducer, initialState.formState)
   const [isPending, startTransition] = useTransition()
@@ -607,21 +670,7 @@ function App() {
     }
   }
 
-  const handleApplyLiveEvent = (event: {
-    type: 'temporary-out'
-    playerId: string
-    replacementPlayerId: string
-    role: LiveAdjustmentRole
-  } | {
-    type: 'return'
-    playerId: string
-    replacementPlayerId: string
-    role: LiveAdjustmentRole
-  } | {
-    type: 'position-swap'
-    playerId: string
-    targetPlayerId: string
-  }) => {
+  const handleApplyLiveEvent = (event: ApplyLiveEventInput) => {
     if (!displayPlan || !liveAvailability || !matchTimeline || !activeMatchTimer) {
       return
     }
@@ -688,6 +737,24 @@ function App() {
     }
   }
 
+  const handleSwapPeriodSlots = (
+    periodNumber: number,
+    fallbackAssignments: Record<BoardSlotId, string>,
+    sourceSlot: BoardSlotId,
+    targetSlot: BoardSlotId,
+  ) => {
+    setShouldSyncShareUrl(true)
+    setLiveError(null)
+    setPeriodOverrides((current) => {
+      const currentAssignments = normalizedOverrides[periodNumber] ?? fallbackAssignments
+
+      return {
+        ...current,
+        [periodNumber]: swapBoardAssignments(currentAssignments, sourceSlot, targetSlot),
+      }
+    })
+  }
+
   const handleSelectBottomTab = (tabId: BottomTabId) => {
     const tab = BOTTOM_TAB_ITEMS.find((item) => item.id === tabId)
 
@@ -708,112 +775,143 @@ function App() {
     })
   }
 
+  const handleScrollToLiveNowSection = () => {
+    document.getElementById(LIVE_NOW_SECTION_ID)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }
+
+  return {
+    activeBottomTab,
+    canSelectTimerPeriod,
+    dispatch,
+    displayPlan,
+    formState,
+    hasGeneratedPlan,
+    isPending,
+    liveAvailability,
+    liveError,
+    matchProgress,
+    matchTimeline,
+    normalizedOverrides,
+    plan,
+    playerNameById,
+    playerOptions,
+    rosterCount: rosterNames.length,
+    selectedTimerPeriod,
+    showFloatingMatchTimer,
+    showLiveNowPanel,
+    unavailableRoleById,
+    handleApplyLiveEvent,
+    handleGenerate,
+    handlePauseMatch,
+    handleResetMatchTimer,
+    handleResumeMatch,
+    handleScrollToLiveNowSection,
+    handleSelectBottomTab,
+    handleSelectTimerPeriod,
+    handleStartMatch,
+    handleSwapPeriodSlots,
+  }
+}
+
+function AppShell({ app }: { app: AppController }) {
   return (
     <main className="relative min-h-screen overflow-hidden text-stone-100">
       <div
         className={`mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-3 py-4 sm:gap-8 sm:px-6 sm:py-6 lg:px-8 ${
-          showFloatingMatchTimer ? 'pb-52 sm:pb-56 lg:pb-10' : 'pb-28 sm:pb-32 lg:pb-10'
+          app.showFloatingMatchTimer ? 'pb-52 sm:pb-56 lg:pb-10' : 'pb-28 sm:pb-32 lg:pb-10'
         }`}
       >
         <section id="section-pre-match" className="scroll-mt-4">
           <header className="grid gap-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-board backdrop-blur sm:rounded-[2rem] sm:gap-6 sm:p-6 md:grid-cols-[1.1fr_0.9fr]">
             <HeroPanel />
             <SettingsPanel
-              state={formState}
-              dispatch={dispatch}
-              playerOptions={playerOptions}
-              rosterCount={rosterNames.length}
-              isPending={isPending}
-              onGenerate={handleGenerate}
+              state={app.formState}
+              dispatch={app.dispatch}
+              playerOptions={app.playerOptions}
+              rosterCount={app.rosterCount}
+              isPending={app.isPending}
+              onGenerate={app.handleGenerate}
             />
           </header>
         </section>
 
         <section id="section-match-mode" className="scroll-mt-4 space-y-5">
-          {displayPlan && plan ? (
+          {app.displayPlan && app.plan ? (
             <>
               <MatchOverview
-                plan={displayPlan}
-                playerNameById={playerNameById}
-                matchProgress={matchProgress}
-                matchTimeline={matchTimeline}
-                selectedTimerPeriod={selectedTimerPeriod}
-                canSelectTimerPeriod={canSelectTimerPeriod}
-                onStartMatch={handleStartMatch}
-                onPauseMatch={handlePauseMatch}
-                onResumeMatch={handleResumeMatch}
-                onResetMatch={handleResetMatchTimer}
-                onSelectTimerPeriod={handleSelectTimerPeriod}
+                plan={app.displayPlan}
+                playerNameById={app.playerNameById}
+                matchProgress={app.matchProgress}
+                matchTimeline={app.matchTimeline}
+                selectedTimerPeriod={app.selectedTimerPeriod}
+                canSelectTimerPeriod={app.canSelectTimerPeriod}
+                onStartMatch={app.handleStartMatch}
+                onPauseMatch={app.handlePauseMatch}
+                onResumeMatch={app.handleResumeMatch}
+                onResetMatch={app.handleResetMatchTimer}
+                onSelectTimerPeriod={app.handleSelectTimerPeriod}
               />
 
-              {showLiveNowPanel ? (
+              {app.showLiveNowPanel ? (
                 <LiveNowPanel
                   id={LIVE_NOW_SECTION_ID}
-                  key={`live-period-${matchProgress!.activePeriod}`}
-                  plan={displayPlan}
+                  key={`live-period-${app.matchProgress!.activePeriod}`}
+                  plan={app.displayPlan}
                   period={
-                    displayPlan.periods.find((period) => period.period === matchProgress!.activePeriod) ??
-                    displayPlan.periods[0]
+                    app.displayPlan.periods.find((period) => period.period === app.matchProgress!.activePeriod) ??
+                    app.displayPlan.periods[0]
                   }
-                  availability={liveAvailability!}
-                  nameById={playerNameById}
-                  activeMinute={roundMinuteValue(matchProgress!.elapsedMs / 60_000)}
-                  activeChunkIndex={matchProgress!.activeChunkIndex!}
-                  unavailableRoleById={unavailableRoleById}
-                  onApplyLiveEvent={handleApplyLiveEvent}
+                  availability={app.liveAvailability!}
+                  nameById={app.playerNameById}
+                  activeMinute={roundMinuteValue(app.matchProgress!.elapsedMs / 60_000)}
+                  activeChunkIndex={app.matchProgress!.activeChunkIndex!}
+                  unavailableRoleById={app.unavailableRoleById}
+                  onApplyLiveEvent={app.handleApplyLiveEvent}
                 />
               ) : null}
 
-              {liveError ? (
+              {app.liveError ? (
                 <section className="rounded-[1.35rem] border border-red-400/20 bg-red-950/40 px-4 py-3 text-sm text-red-100">
-                  {liveError}
+                  {app.liveError}
                 </section>
               ) : null}
 
               <section className="grid gap-5 xl:grid-cols-3">
-                {displayPlan.periods.map((period, index) => (
-                  <PeriodCard
-                    key={`${displayPlan.seed}-${period.period}`}
-                    period={period}
-                    boardAssignments={
-                      normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
-                    }
-                    nameById={playerNameById}
-                    defaultLockedSlots={
-                      displayPlan.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
-                    }
-                    isActivePeriod={matchProgress?.activePeriod === period.period}
-                    activeChunkIndex={
-                      matchProgress?.activePeriod === period.period ? matchProgress.activeChunkIndex : null
-                    }
-                    periodState={getPeriodState(period.period, matchProgress)}
-                    onSwapSlots={(sourceSlot, targetSlot) => {
-                      setShouldSyncShareUrl(true)
-                      setLiveError(null)
-                      setPeriodOverrides((current) => {
-                        const currentAssignments =
-                          normalizedOverrides[period.period] ?? createBoardAssignments(plan.periods[index])
+                {app.displayPlan.periods.map((period, index) => {
+                  const boardAssignments =
+                    app.normalizedOverrides[period.period] ?? createBoardAssignments(app.plan!.periods[index])
 
-                        return {
-                          ...current,
-                          [period.period]: swapBoardAssignments(
-                            currentAssignments,
-                            sourceSlot,
-                            targetSlot,
-                          ),
-                        }
-                      })
-                    }}
-                  />
-                ))}
+                  return (
+                    <PeriodCard
+                      key={`${app.displayPlan!.seed}-${period.period}`}
+                      period={period}
+                      boardAssignments={boardAssignments}
+                      nameById={app.playerNameById}
+                      defaultLockedSlots={
+                        app.displayPlan!.lockedGoalkeepers[index] ? [GOALKEEPER_SLOT] : []
+                      }
+                      isActivePeriod={app.matchProgress?.activePeriod === period.period}
+                      activeChunkIndex={
+                        app.matchProgress?.activePeriod === period.period ? app.matchProgress.activeChunkIndex : null
+                      }
+                      periodState={getPeriodState(period.period, app.matchProgress)}
+                      onSwapSlots={(sourceSlot, targetSlot) =>
+                        app.handleSwapPeriodSlots(period.period, boardAssignments, sourceSlot, targetSlot)
+                      }
+                    />
+                  )
+                })}
               </section>
 
-              {showFloatingMatchTimer ? (
+              {app.showFloatingMatchTimer ? (
                 <FloatingMatchTimer
-                  matchProgress={matchProgress!}
-                  matchTimeline={matchTimeline!}
-                  canScrollToLiveNowSection={showLiveNowPanel}
-                  onScrollToLiveNowSection={scrollToLiveNowSection}
+                  matchProgress={app.matchProgress!}
+                  matchTimeline={app.matchTimeline!}
+                  canScrollToLiveNowSection={app.showLiveNowPanel}
+                  onScrollToLiveNowSection={app.handleScrollToLiveNowSection}
                 />
               ) : null}
             </>
@@ -824,26 +922,19 @@ function App() {
           )}
         </section>
 
-        {displayPlan && plan ? (
+        {app.displayPlan && app.plan ? (
           <section id="section-minutes" className="scroll-mt-4">
-            <PlayerMinutesSection plan={displayPlan} />
+            <PlayerMinutesSection plan={app.displayPlan} />
           </section>
         ) : null}
       </div>
       <BottomTabBar
-        activeTab={activeBottomTab}
-        hasGeneratedPlan={hasGeneratedPlan}
-        onSelectTab={handleSelectBottomTab}
+        activeTab={app.activeBottomTab}
+        hasGeneratedPlan={app.hasGeneratedPlan}
+        onSelectTab={app.handleSelectBottomTab}
       />
     </main>
   )
-
-  function scrollToLiveNowSection() {
-    document.getElementById(LIVE_NOW_SECTION_ID)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    })
-  }
 }
 
 function HeroPanel() {

@@ -270,6 +270,33 @@ describe('analyzeMatchPlan', () => {
     expect(analysis.validations.summaryMinutesConsistent).toBe(true)
     expect('uniqueGoalkeepersPerPeriod' in analysis.validations).toBe(false)
   })
+
+  it('uses a repeated-goalkeeper spread floor when one goalkeeper is locked for every period', () => {
+    const players = createNamedPlayers(11)
+    const lockedGoalkeeperIds = [players[0].id, players[0].id, players[0].id, players[0].id]
+    const chunkMinutes = 12.5
+    const plan = generateMatchPlan({
+      players,
+      periodCount: 4,
+      periodMinutes: 25,
+      formation: '2-3-1',
+      chunkMinutes,
+      lockedGoalkeeperIds,
+      seed: 1,
+      attempts: 48,
+    })
+    const analysis = analyzeMatchPlan(plan, {
+      playerCount: 11,
+      chunkMinutes,
+      lockedGoalkeeperIds,
+    })
+
+    expect(analysis.derivedMetrics.totalMinuteSpread).toBe(50)
+    expect(analysis.derivedMetrics.benchMinuteSpread).toBe(50)
+    expect(analysis.derivedMetrics.maxAllowedMinuteSpread).toBe(52.5)
+    expect(analysis.validations.minuteSpreadWithinLimit).toBe(true)
+    expect(analysis.validations.benchSpreadWithinLimit).toBe(true)
+  })
 })
 
 describe('createAuditRecord', () => {
@@ -378,6 +405,45 @@ describe('createAuditRecord', () => {
       chunkStates: ['B', 'P', 'P', 'B'],
     })
     expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('ok')
+    expect(record.flags).not.toContain('isolated-play-blocks')
+  })
+
+  it('accepts tiny recurring-decimal spread overages for 4x25 three-sub plans', () => {
+    const record = createAuditRecord(
+      createStandardScenario({
+        playerCount: 11,
+        periodCount: 4,
+        periodMinutes: 25,
+        formation: '2-3-1',
+        substitutionsPerPeriod: 3,
+      }),
+      1,
+    )
+
+    expect(record.derivedMetrics.totalMinuteSpread).toBe(8.335)
+    expect(record.derivedMetrics.maxAllowedMinuteSpread).toBe(8.333)
+    expect(record.validations.minuteSpreadWithinLimit).toBe(true)
+    expect(record.validations.benchSpreadWithinLimit).toBe(true)
+    expect(record.flags).not.toContain('minute-spread-over-limit')
+    expect(record.flags).not.toContain('bench-spread-over-limit')
+  })
+
+  it('downgrades dense 4x25 five-sub isolated blocks when fairness still holds', () => {
+    const record = createAuditRecord(
+      createStandardScenario({
+        playerCount: 12,
+        periodCount: 4,
+        periodMinutes: 25,
+        formation: '2-3-1',
+        substitutionsPerPeriod: 5,
+      }),
+      1,
+    )
+
+    expect(record.derivedMetrics.allowedIsolatedPlayBlocksPerPlayer).toBe(5)
+    expect(record.derivedMetrics.isolatedPlayBlockSeverity).toBe('warning')
+    expect(record.validations.minuteSpreadWithinLimit).toBe(true)
+    expect(record.validations.benchSpreadWithinLimit).toBe(true)
     expect(record.flags).not.toContain('isolated-play-blocks')
   })
 

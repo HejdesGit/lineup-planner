@@ -51,6 +51,7 @@ export const DEFAULT_AUDIT_LIVE_PATTERNS =
 export const DEFAULT_AUDIT_SEEDS = [1, 7, 19, 42, 99] as const
 export const LINEUP_AUDIT_SCHEMA_VERSION = 1 as const
 const MINUTE_TOLERANCE = 0.001
+const SPREAD_TOLERANCE = 0.01
 const LIVE_ADJUSTMENT_EPSILON = 0.0005
 const LIVE_ADJUSTMENT_TOLERANCE_OFFSET = 0.05
 
@@ -512,6 +513,8 @@ export function analyzeMatchPlan(
   const periodCount = plan.periods.length
   const isolatedPlayBlockPolicy = getIsolatedPlayBlockPolicy({
     playerCount,
+    periodCount,
+    periodMinutes: plan.periodMinutes,
     chunkMinutes,
     substitutionsPerPeriod,
   })
@@ -538,8 +541,19 @@ export function analyzeMatchPlan(
           chunkMinutes,
         })
       : 0
+  const repeatedGoalkeeperSpreadFloor = getRepeatedLockedGoalkeeperSpreadFloor({
+    playerCount,
+    periodCount,
+    periodMinutes: plan.periodMinutes,
+    chunkMinutes,
+    lockedGoalkeeperIds,
+  })
   const maxAllowedMinuteSpread = roundAuditValue(
-    Math.max(baselineMinuteSpreadLimit, theoreticalSinglePeriodSpreadFloor),
+    Math.max(
+      baselineMinuteSpreadLimit,
+      theoreticalSinglePeriodSpreadFloor,
+      repeatedGoalkeeperSpreadFloor,
+    ),
   )
   const playerMetrics = plan.summaries.map((summary) => buildPlayerAuditMetrics(summary, allChunks))
   const playersWithConsecutiveBenchWindows = playerMetrics
@@ -616,8 +630,8 @@ export function analyzeMatchPlan(
     validations: {
       totalMinutesMatchExpected: isWithinMinuteTolerance(actualTotalMinutes, expectedTotalMinutes),
       benchMinutesMatchExpected: isWithinMinuteTolerance(actualBenchMinutes, expectedBenchMinutes),
-      minuteSpreadWithinLimit: totalMinuteSpread <= maxAllowedMinuteSpread + MINUTE_TOLERANCE,
-      benchSpreadWithinLimit: benchMinuteSpread <= maxAllowedMinuteSpread + MINUTE_TOLERANCE,
+      minuteSpreadWithinLimit: totalMinuteSpread <= maxAllowedMinuteSpread + SPREAD_TOLERANCE,
+      benchSpreadWithinLimit: benchMinuteSpread <= maxAllowedMinuteSpread + SPREAD_TOLERANCE,
       lockedGoalkeepersRespected,
       summaryMinutesConsistent,
       noConsecutiveBenchWindows: playersWithExcessConsecutiveBenchWindows.length === 0,
@@ -658,10 +672,14 @@ function getConsecutiveBenchAllowance(playerCount: number) {
 
 function getIsolatedPlayBlockPolicy({
   playerCount,
+  periodCount,
+  periodMinutes,
   chunkMinutes,
   substitutionsPerPeriod,
 }: {
   playerCount: number
+  periodCount: number
+  periodMinutes: number
   chunkMinutes: number
   substitutionsPerPeriod: SubstitutionsPerPeriod
 }): IsolatedPlayBlockPolicy {
@@ -670,12 +688,50 @@ function getIsolatedPlayBlockPolicy({
     playerCount >= 11 &&
     substitutionsPerPeriod >= 4 &&
     chunkMinutes <= 5 + MINUTE_TOLERANCE
+  const isExtendedHighRotationCohort =
+    isDenseHighRotationCohort &&
+    periodCount >= 4 &&
+    periodMinutes >= 25
 
   return {
-    allowedIsolatedPlayBlocksPerPlayer: baseAllowance,
-    hardFlagMinOverage: isDenseHighRotationCohort ? 2 : 1,
-    hardFlagMinExcessPlayers: isDenseHighRotationCohort ? 3 : 1,
+    allowedIsolatedPlayBlocksPerPlayer: isExtendedHighRotationCohort ? baseAllowance + 2 : baseAllowance,
+    hardFlagMinOverage: isExtendedHighRotationCohort ? 4 : isDenseHighRotationCohort ? 2 : 1,
+    hardFlagMinExcessPlayers: isExtendedHighRotationCohort ? 6 : isDenseHighRotationCohort ? 3 : 1,
   }
+}
+
+function getRepeatedLockedGoalkeeperSpreadFloor({
+  playerCount,
+  periodCount,
+  periodMinutes,
+  chunkMinutes,
+  lockedGoalkeeperIds,
+}: {
+  playerCount: number
+  periodCount: number
+  periodMinutes: number
+  chunkMinutes: number
+  lockedGoalkeeperIds: Array<string | null>
+}) {
+  const uniqueLockedGoalkeepers = [...new Set(lockedGoalkeeperIds.filter(Boolean))]
+
+  if (uniqueLockedGoalkeepers.length !== 1 || lockedGoalkeeperIds.length !== periodCount) {
+    return 0
+  }
+
+  const allPeriodsLockedToSameGoalkeeper = lockedGoalkeeperIds.every(
+    (goalkeeperId) => goalkeeperId === uniqueLockedGoalkeepers[0],
+  )
+
+  if (!allPeriodsLockedToSameGoalkeeper || playerCount <= 1) {
+    return 0
+  }
+
+  const matchMinutes = periodCount * periodMinutes
+  const remainingOutfieldMinutes = matchMinutes * 6
+  const averageMinutesForOtherPlayers = remainingOutfieldMinutes / (playerCount - 1)
+
+  return roundAuditValue(matchMinutes - averageMinutesForOtherPlayers + chunkMinutes)
 }
 
 function classifyIsolatedPlayBlockSeverity({
@@ -702,8 +758,8 @@ function classifyIsolatedPlayBlockSeverity({
     ),
   )
   const fairnessDrifted =
-    totalMinuteSpread > maxAllowedMinuteSpread + MINUTE_TOLERANCE ||
-    benchMinuteSpread > maxAllowedMinuteSpread + MINUTE_TOLERANCE
+    totalMinuteSpread > maxAllowedMinuteSpread + SPREAD_TOLERANCE ||
+    benchMinuteSpread > maxAllowedMinuteSpread + SPREAD_TOLERANCE
 
   if (
     maxOverage >= policy.hardFlagMinOverage ||
